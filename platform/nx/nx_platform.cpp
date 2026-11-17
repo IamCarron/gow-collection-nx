@@ -43,6 +43,16 @@ void init() {
     setenv("MESA_GLSL_CACHE_DISABLE", "true", 1);
     // O NVK só expõe GPUs Maxwell (o Tegra X1 é GM20B) com esta variável; sem ela vkEnumeratePhysicalDevices dá 0.
     setenv("NVK_I_WANT_A_BROKEN_VULKAN_DRIVER", "1", 1);
+    // Teste A/B sem recompilar: nvk_debug.txt na pasta do jogo vira NVK_DEBUG (ex.: "no_zcull,no_compression").
+    if (std::FILE *f = std::fopen((g_root + "/nvk_debug.txt").c_str(), "r")) {
+        char buf[128] = {};
+        if (std::fgets(buf, sizeof buf, f)) {
+            for (char *c = buf; *c; c++)
+                if (*c == 13 || *c == 10) *c = 0;
+            if (buf[0]) setenv("NVK_DEBUG", buf, 1);
+        }
+        std::fclose(f);
+    }
     // As mensagens do Mesa (mesa_loge) vão para o stderr: guardar em logs/mesa.txt.
     {
         const std::string p = g_root + "/logs/mesa.txt";
@@ -76,6 +86,62 @@ void log_clocks() {
     vt::logf("nx: relógios agora: CPU %u MHz, GPU %u MHz, memória %u MHz", cpu, gpu, emc);
 }
 
+// GPU 460,8 MHz (perfil oficial do portátil, não é overclock) só com a resolução 720p no modo portátil.
+// Chamado a cada quadro: só fala com o clkrst quando muda o pedido ou o modo. Ao sair do 720p volta ao relógio de antes.
+static u32 g_gpu_antes = 0; // 0 = não mexemos na GPU
+static u32 gpu_rate() {
+    u32 hz = 0;
+    ClkrstSession s;
+    if (R_SUCCEEDED(clkrstOpenSession(&s, PcvModuleId_GPU, 3))) clkrstGetClockRate(&s, &hz), clkrstCloseSession(&s);
+    return hz;
+}
+static Result gpu_set(u32 hz) {
+    ClkrstSession s;
+    Result rc = clkrstOpenSession(&s, PcvModuleId_GPU, 3);
+    if (R_SUCCEEDED(rc)) rc = clkrstSetClockRate(&s, hz), clkrstCloseSession(&s);
+    return rc;
+}
+// Confere a cada ~2 s (120 quadros): se o sistema ou outro programa baixou a GPU, aplica de novo.
+void gpu_720p(bool on) {
+    static int ultimo = -1;
+    static uint32_t quadros = 0;
+    static int erros = 0;
+    const bool portatil = appletGetOperationMode() == AppletOperationMode_Handheld;
+    const int estado = (on ? 1 : 0) | (portatil ? 2 : 0);
+    const bool conferir = on && portatil && ++quadros >= 120;
+    if (estado == ultimo && !conferir) return;
+    if (conferir) quadros = 0;
+    const bool mudou = estado != ultimo;
+    ultimo = estado;
+    if (R_FAILED(clkrstInitialize())) {
+        if (erros++ < 3) vt::logf("nx: clkrst indisponível");
+        return;
+    }
+    const u32 agora = gpu_rate();
+    if (on && portatil) {
+        if (agora < 460800000u) {
+            if (!g_gpu_antes) g_gpu_antes = agora;
+            const Result rc = gpu_set(460800000u);
+            const u32 depois = gpu_rate();
+            if (mudou || erros < 5) {
+                vt::logf("nx: 720p no portátil: GPU %u -> %u MHz (rc 0x%x)%s", agora / 1000000, depois / 1000000, rc,
+                         mudou ? "" : " [reaplicado]");
+                if (!mudou) erros++;
+            }
+        } else if (mudou) vt::logf("nx: 720p no portátil: GPU já em %u MHz", agora / 1000000);
+    } else if (g_gpu_antes) {
+        // no dock o sistema troca o perfil sozinho (768 MHz); no portátil volta ao valor de antes
+        if (portatil) gpu_set(g_gpu_antes);
+        vt::logf("nx: GPU de volta a %u MHz", gpu_rate() / 1000000);
+        g_gpu_antes = 0;
+    }
+    clkrstExit();
+}
+static void gpu_restaurar() {
+    if (!g_gpu_antes || appletGetOperationMode() != AppletOperationMode_Handheld) return;
+    if (R_SUCCEEDED(clkrstInitialize())) gpu_set(g_gpu_antes), clkrstExit();
+}
+
 uint8_t *guest_window() {
     if (g_window) return g_window;
     const size_t size = (size_t)(kGuestHi - kGuestLo);
@@ -102,6 +168,22 @@ const char *game_name() { return GOW_GAME; }
 
 void request_exit() { g_exit = true; }
 bool exit_requested() { return g_exit; }
+
+// std::exit com o jogo, o som, o vídeo e a gravação Vulkan ainda rodando destruía objetos estáticos e o Vulkan
+// por baixo dessas threads: o fechamento pelo HOME travava ou dava erro. Aqui só os arquivos são gravados
+// (logs e saves no cartão) e o processo termina pelo kernel, que libera GPU, som e serviços sozinho.
+[[noreturn]] void hard_exit(int code) {
+    static std::atomic<bool> once{false};
+    if (once.exchange(true)) for (;;) svcSleepThread(1000000000ll); // outra thread já está saindo
+    vt::logf("nx: saindo (código %d)", code);
+    gpu_restaurar();
+    vt::log_flush();
+    std::fflush(nullptr);
+    fsdevUnmountAll();
+    appletUnlockExit();
+    svcExitProcess();
+    for (;;) svcSleepThread(1000000000ll);
+}
 
 bool applet_loop() {
     if (!appletMainLoop()) g_exit = true;
@@ -187,8 +269,8 @@ void prof_start() {
             std::unordered_map<std::string, uint32_t> waits;
             uint64_t total = 0, wtotal = 0;
         };
-        Target tg[2];
-        tg[0].name = "main", tg[1].name = "Render";
+        Target tg[3]; // + a thread de gravação Vulkan (o custo de CPU por desenho fica nela)
+        tg[0].name = "main", tg[1].name = "Render", tg[2].name = "gravacao vk";
         const uint64_t m = (uint64_t)(uintptr_t)&main;
         MemoryInfo cm{};
         u32 pi = 0;

@@ -60,6 +60,10 @@ vitaRT** (como parches), el **launcher** y los scripts de compilación.
 | **1x** (720p) | 1020 MHz | de serie | ✅ **no hace falta** |
 | **2x** | 1020 MHz | **614 MHz** | ⚠️ **necesita la GPU a 614 MHz** (p. ej. sys-clk) |
 
+> [!NOTE]
+> **v1.2:** *God of War* a 720p corre a **~45–60 FPS con los relojes de fábrica** (FPS máximo), frente a ~22 FPS
+> en las escenas pesadas de la v1.0. Detalles en el [CHANGELOG](CHANGELOG.md).
+
 Medido en hardware real, modo portátil. El efecto de cada optimización está en [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ## 📦 Requisitos

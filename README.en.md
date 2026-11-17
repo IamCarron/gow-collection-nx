@@ -60,6 +60,10 @@ runtime** (as patches), the **launcher** and the build scripts.
 | **1x** (720p) | 1020 MHz | stock | ✅ **not needed** |
 | **2x** | 1020 MHz | **614 MHz** | ⚠️ **needs the GPU at 614 MHz** (e.g. sys-clk) |
 
+> [!NOTE]
+> **v1.2:** *God of War* at 720p runs at **~45–60 FPS on stock clocks** (max FPS), up from ~22 FPS in heavy
+> scenes on v1.0. Details in the [CHANGELOG](CHANGELOG.md).
+
 Measured on real hardware, handheld mode. The effect of each optimization is in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ## 📦 Requirements

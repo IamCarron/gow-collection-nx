@@ -17,6 +17,7 @@ void prof_start();          // amostragem da thread main do jogo (logs/perfil_<j
 void dump_fs_ops(bool recent);       // operações no SD pendentes e as últimas concluídas
 void set_clocks(); // CPU e GPU no máximo do modo (clkrst)
 void log_clocks(); // relógios atuais no log
+void gpu_720p(bool on); // GPU 460,8 MHz com 720p no portátil (a cada quadro; só age quando muda)
 // Base da janela do guest: guest_window() + endereço do Vita (0x80000000..0xC0000000) é memória válida.
 uint8_t *guest_window();
 uint8_t *g_window_base(); // a mesma base, sem alocar (nullptr antes do guest_window)
@@ -27,6 +28,8 @@ const char *game_name();
 // Pede para o processo sair (HOME/plus) e devolve se já foi pedido.
 void request_exit();
 bool exit_requested();
+// Sai do processo na hora (HOME, fim do jogo): grava os arquivos e encerra sem destrutores, com as outras threads paradas.
+[[noreturn]] void hard_exit(int code);
 // Aplet em primeiro plano: false durante o menu HOME (o jogo continua, o som e a imagem seguem normalmente).
 bool applet_loop();
 

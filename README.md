@@ -60,6 +60,10 @@ runtime do vitaRT** (em forma de patches), o **launcher** e os scripts de compil
 | **1x** (720p) | 1020 MHz | padrão | ✅ **não precisa** |
 | **2x** | 1020 MHz | **614 MHz** | ⚠️ **precisa da GPU a 614 MHz** (ex.: sys-clk) |
 
+> [!NOTE]
+> **v1.2:** *God of War* em 720p roda a **~45–60 FPS no relógio padrão** (FPS máximo), contra ~22 FPS nas cenas
+> pesadas da v1.0. Detalhes no [CHANGELOG](CHANGELOG.md).
+
 Medido no Switch real, modo portátil. A evolução de cada otimização está em [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ## 📦 Requisitos

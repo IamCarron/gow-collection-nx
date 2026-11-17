@@ -1,5 +1,5 @@
 diff --git a/games/gow/game_options.cpp b/games/gow/game_options.cpp
-index 33a9d82..54cb9cc 100644
+index 33a9d82..bb35ed5 100644
 --- a/games/gow/game_options.cpp
 +++ b/games/gow/game_options.cpp
 @@ -18,6 +18,9 @@
@@ -40,11 +40,13 @@ index 33a9d82..54cb9cc 100644
  // proporção de cada escolha do menu (1 = Auto, pelo monitor); nomes do ini na mesma ordem
  const float kAspecto[] = {0.f, 0.f, 16.f / 9.f, 1.6f, 64.f / 27.f, 32.f / 9.f, 4.f / 3.f};
  const char *kAspectoNome[] = {"", "auto", "16:9", "16:10", "21:9", "32:9", "4:3"};
-@@ -138,7 +154,7 @@ void save() {
+@@ -137,8 +153,8 @@ void save() {
+     // o Settings pode ter trocado com o jogo aberto (vale na próxima abertura)
      std::vector<std::string> alheias;
      if (FILE *f = fopen(ini_path().c_str(), "r")) {
-         static const char *nossas[] = {"#", "hd_textures=", "ps2_audio=", "resolution=", "fps=", "vsync=", "fps_counter=",
+-        static const char *nossas[] = {"#", "hd_textures=", "ps2_audio=", "resolution=", "fps=", "vsync=", "fps_counter=",
 -                                       "borderless=", "auto_qte=", "cheat_", "enemy_health_bars=", "mod_", "ps2_iso=", "aspect="};
++        static const char *nossas[] = {"#", "hd_textures=", "ps2_audio=", "resolution=", KRES, "fps=", "vsync=", "fps_counter=",
 +                                       "borderless=", "auto_qte=", "cheat_", "enemy_health_bars=", "mod_", "ps2_iso=", "aspect=", "upscaler=", "fsr_sharpness=", "dynamic_resolution="};
          char line[1024];
          while (fgets(line, sizeof line, f)) {
@@ -182,7 +184,35 @@ index 33a9d82..54cb9cc 100644
      const TimeProfile *tp = is_gow1() ? &kGow1 : is_gow2() ? &kGow2 : nullptr;
      if (tp) {
          // VITART_MEMSNAP="q1,q2,...": grava a memória global do jogo (0x81000000..0x81800000, só o mapeado)
-@@ -659,11 +712,13 @@ void game_options_tick() {
+@@ -582,7 +635,11 @@ void game_options_tick() {
+             }
+         }
+         // VITART_TIMEDUMP=1 (depuração): a soma do dt do jogo contra o relógio, a cada 10 s
++#ifdef __SWITCH__
++        if (true) { // no Switch sempre: mostra se o jogo anda em câmera lenta (razão < 1) com o VSync
++#else
+         if (getenv("VITART_TIMEDUMP")) {
++#endif
+             static double game_t = 0;
+             static uint32_t nframes = 0;
+             static auto t0 = std::chrono::steady_clock::now();
+@@ -592,8 +649,13 @@ void game_options_tick() {
+             if (std::isfinite(dtv) && dtv > 0 && dtv < 1) game_t += dtv, nframes++;
+             const double real = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+             if (real >= 10) {
+-                logf("vitart: tempo do jogo %.2f s em %.2f s reais (%u quadros, razão %.3f), menu %u", game_t, real, nframes,
+-                     game_t / real, tp->menu ? rd32(tp->menu) : 0u);
++                float flv;
++                const uint32_t fr = rd32(tp->floor);
++                std::memcpy(&flv, &fr, 4);
++                logf("vitart: tempo do jogo %.2f s em %.2f s reais (%u quadros, razão %.3f), menu %u, caminho %u "
++                     "(0 tempo real, 1 passo fixo), piso %.0f, VSync %u, FPS %u",
++                     game_t, real, nframes, game_t / real, tp->menu ? rd32(tp->menu) : 0u, rd32(tp->floor + 4), flv,
++                     g_opt.vsync ? 1u : 0u, g_opt.fps);
+                 game_t = 0, nframes = 0, t0 = std::chrono::steady_clock::now();
+             }
+         }
+@@ -659,11 +721,18 @@ void game_options_tick() {
          g_opt.tex = v == 2, texpack_set_enabled(g_opt.tex), changed = true;
      if (const uint32_t v = g_req_aud.exchange(0); v && ps2audio_available() && (v == 2) != g_opt.audio)
          g_opt.audio = v == 2, ps2audio_set_enabled(g_opt.audio), changed = true;
@@ -191,15 +221,21 @@ index 33a9d82..54cb9cc 100644
          g_opt.scale = v, changed = true;
 -        gvk::set_render_scale(v);
 -        logf("vitart: resolução interna %ux (%ux%u)", v, 960 * v, 544 * v);
+-    }
 +        gvk::set_render_scale_f(scale_f(v));
 +        logf("vitart: resolução interna %.3fx (%ux%u)", scale_f(v), (unsigned)(720 * scale_f(v) + 0.5f),
 +             (unsigned)(408 * scale_f(v) + 0.5f));
-     }
++    }
++#ifdef __SWITCH__
++    // GPU 460 com 720p: desligado a pedido (relógios de fábrica). VITART_GPU460=1 liga para teste.
++    static const bool gpu460 = getenv("VITART_GPU460") != nullptr;
++    if (gpu460) nxp::gpu_720p(g_opt.scale == 5);
++#endif
 +    if (g_req_save.exchange(0)) changed = true; // mod menu: escalonamento/nitidez
      if (const uint32_t v = g_req_asp.exchange(0); v >= 1 && v <= 6 && v != g_opt.aspecto) {
          g_opt.aspecto = v, changed = true;
          logf("vitart: proporção da tela %s", kAspectoNome[v]);
-@@ -687,7 +742,7 @@ void game_options_tick() {
+@@ -687,7 +756,7 @@ void game_options_tick() {
          gvk::set_aspect_widen(w);
      }
      if (const uint32_t v = g_req_fps.exchange(0); v >= 1 && v <= 3 && v != g_opt.fps) {
@@ -208,7 +244,7 @@ index 33a9d82..54cb9cc 100644
          logf("vitart: FPS %s", v == 3 ? "máximo" : v == 2 ? "60" : "30");
      }
      if (const uint32_t v = g_req_vsync.exchange(0); (v == 1 || v == 2) && (v == 2) != g_opt.vsync) {
-@@ -904,3 +959,48 @@ uint32_t game_qte_auto(uint8_t &lx, uint8_t &ly) {
+@@ -904,3 +973,48 @@ uint32_t game_qte_auto(uint8_t &lx, uint8_t &ly) {
  }
  
  } // namespace vt

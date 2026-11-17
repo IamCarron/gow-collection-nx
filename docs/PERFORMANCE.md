@@ -18,6 +18,17 @@ Meta: **30 fps no relógio padrão do Switch** (CPU 1020 MHz, sem overclock).
 
 Com isso, as threads `main` e `Render` passam a maior parte do quadro esperando: a CPU deixou de ser o gargalo.
 
+## v1.2 — GPU em 720p (God of War, relógio padrão, GPU 307 MHz)
+
+| Etapa | Resultado |
+|---|---|
+| v1.0 | ~22 fps nas cenas pesadas |
+| compressão + ZCULL do NVK | 25–28 fps |
+| leitura direta de alvos, cópias por compute, anisotrópico 4x | **~45–60 fps** (FPS máximo) |
+
+Tempo de GPU fora dos passes por quadro: cópia da profundidade 2,1 → 0,3 ms; cópia da própria cena 1,2 → 0,65 ms.
+O log `vk: GPU por alvo` mostra cada segmento.
+
 ## Threads
 
 | Thread | Núcleo | Prioridade | Papel |
