@@ -1,0 +1,35 @@
+--- a/runtime/arm/arc.h
++++ b/runtime/arm/arc.h
+@@ -8,7 +8,14 @@
+ 
+ #include "arc_abi.h"
+ 
++/* A base da memória do guest só é escrita por arc_runtime.c/arc_dll.c (ARC_MEM_WRITABLE), antes de qualquer
++ * código gerado rodar. Para o código gerado ela é const: o compilador a guarda num registrador em vez de
++ * recarregá-la depois de cada escrita na memória do guest (que poderia, para ele, apontar para a própria arc_mem). */
++#ifdef ARC_MEM_WRITABLE
+ extern uint8_t *arc_mem;
++#else
++extern uint8_t *const arc_mem;
++#endif
+ extern const arc_func_entry arc_func_table[];
+ extern const unsigned arc_func_count;
+ extern const arc_segment arc_segments[];
+--- a/runtime/arm/arc_dll.c
++++ b/runtime/arm/arc_dll.c
+@@ -2,6 +2,7 @@
+  * arc_ret_mismatch...) são encaminhados ao host registrado por arc_bind. A memória do guest é a do
+  * próprio host (no Vita3K, a janela plana de 4 GiB de MemState). */
+ #define ARC_BUILD_DLL 1
++#define ARC_MEM_WRITABLE
+ #include "arc.h"
+ #include "arc_host.h"
+ 
+--- a/runtime/arm/arc_runtime.c
++++ b/runtime/arm/arc_runtime.c
+@@ -1,4 +1,5 @@
+ /* Portable runtime for ARM code recompiled by vitarecomp. */
++#define ARC_MEM_WRITABLE
+ #include "arc.h"
+ 
+ uint8_t *arc_mem;

@@ -1,0 +1,149 @@
+--- a/games/gow/game_options.cpp
++++ b/games/gow/game_options.cpp
+@@ -18,6 +18,9 @@
+ // infinita << 15 | FPS medidos << 17 (0 com o contador desligado; o clipe do contador no HUD mostra esse número). As alternâncias têm um bit (0 Off, 1 On). Texturas e áudio: 1 Off, 2 On, 3 indisponível. Resolução: 1..4
+ // (escala interna). FPS: 1 = 30, 2 = 60, 3 = máximo. As escolhas ficam em <dados>/vitart_options.ini.
+ #include "vitart.h"
++#ifdef __SWITCH__
++#include "nx_platform.h"
++#endif
+ #include <algorithm>
+ #include <cmath>
+ #include <vector>
+@@ -25,6 +28,13 @@
+ #include <filesystem>
+ #include <tuple>
+ #include "gxm_vk.h"
++// No Switch a resolução salva tem chave própria: 0 (padrão) = resolução da tela do Switch; o valor antigo de
++// "resolution=" (1x de quando o padrão era a resolução do Vita) é ignorado.
++#ifdef __SWITCH__
++#define KRES "resolution_switch="
++#else
++#define KRES "resolution="
++#endif
+ #include "gxm_window.h"
+ 
+ #include <cstdio>
+@@ -150,7 +160,7 @@
+     const bool tem_api = std::any_of(alheias.begin(), alheias.end(), [](const std::string &l) { return !l.rfind("renderer=", 0); });
+     if (FILE *f = fopen(ini_path().c_str(), "w")) {
+         fprintf(f, "# Opções do PC (mudam pelo menu de pausa do jogo: Options)\n");
+-        fprintf(f, "hd_textures=%u\nps2_audio=%u\nresolution=%u\nfps=%s\nvsync=%u\nfps_counter=%u\nborderless=%u\nauto_qte=%u\n",
++        fprintf(f, "hd_textures=%u\nps2_audio=%u\n" KRES "%u\nfps=%s\nvsync=%u\nfps_counter=%u\nborderless=%u\nauto_qte=%u\n",
+                 g_opt.tex ? 1u : 0u, g_opt.audio ? 1u : 0u, g_opt.scale, g_opt.fps == 3 ? "max" : g_opt.fps == 2 ? "60" : "30",
+                 g_opt.vsync ? 1u : 0u, g_opt.counter ? 1u : 0u, g_opt.borderless ? 1u : 0u,
+                 g_opt.auto_qte ? 1u : 0u);
+@@ -173,7 +183,7 @@
+             unsigned v = 0;
+             if (sscanf(line, "hd_textures=%u", &v) == 1) g_opt.tex = v != 0;
+             if (sscanf(line, "ps2_audio=%u", &v) == 1) g_opt.audio = v != 0;
+-            if (sscanf(line, "resolution=%u", &v) == 1) g_opt.scale = v <= 4 ? v : 0;
++            if (sscanf(line, KRES "%u", &v) == 1) g_opt.scale = v <= 4 ? v : 0;
+             if (sscanf(line, "fps=%u", &v) == 1) g_opt.fps = v == 60 ? 2 : v > 60 ? 3 : 1;
+             if (!strncmp(line, "fps=max", 7)) g_opt.fps = 3;
+             if (sscanf(line, "fps_counter=%u", &v) == 1) g_opt.counter = v != 0;
+@@ -344,6 +354,12 @@
+ // herói e carrega o R_Hero do checkpoint de novo, agora do mod. Só com a partida rodando e a fila parada.
+ // abre o jogo de novo com a mesma linha de comando: herói, HUD e menus só são lidos na abertura
+ void restart_process() {
++#ifdef __SWITCH__
++    // Switch: sem relançar o próprio processo; fecha o jogo e os mods valem na próxima abertura.
++    logf("vitart: mods aplicados na próxima abertura; fechando o jogo");
++    nxp::request_exit();
++    return;
++#else
+     wchar_t exe[MAX_PATH] = {};
+     GetModuleFileNameW(nullptr, exe, MAX_PATH);
+     std::wstring cmd = GetCommandLineW();
+@@ -356,6 +372,7 @@
+         ExitProcess(0);
+     }
+     logf("vitart: não deu para reiniciar (CreateProcess %lu)", GetLastError());
++#endif
+ }
+ 
+ bool qte_na_tela(); // lá embaixo, junto das tabelas do QTE automático
+@@ -440,12 +457,24 @@
+ }
+ 
+ // Antes do primeiro quadro: aplica as escolhas salvas (texturas, áudio e resolução valem também no GoW2).
++#ifdef __SWITCH__
++static int g_otrace = 0;
++#define OTRACE(x) do { if (g_otrace < 2) logf("opções %d: %s", g_otrace, x); } while (0)
++#else
++#define OTRACE(x) ((void)0)
++#endif
+ void game_options_init() {
++    OTRACE("init: load");
+     load();
++    OTRACE("init: texpack");
+     texpack_set_enabled(g_opt.tex);
++    OTRACE("init: ps2audio");
+     ps2audio_set_enabled(g_opt.audio);
++    OTRACE("init: scale");
+     if (g_opt.scale) gvk::set_render_scale(g_opt.scale);
+-    gvk::set_fps_counter(g_opt.counter && !opt_profile()); // nos dois GoW o contador é o do HUD (FLP)
++    OTRACE("init: fps");
++    gvk::set_fps_counter(g_opt.counter && !opt_profile());
++    OTRACE("init: borderless"); // nos dois GoW o contador é o do HUD (FLP)
+     gvk::set_borderless(g_opt.borderless);
+ }
+ 
+@@ -501,12 +530,19 @@
+ }
+ 
+ void game_options_tick() {
++#ifdef __SWITCH__
++    static int calls = 0;
++    g_otrace = calls++;
++#endif
++    OTRACE("sonda");
+     sonda_aspecto();
+     static bool inited = false;
+     if (!inited) {
+         inited = true;
+         game_options_init();
+-        kbm_icons_start(); // ícones de teclado no HUD (kbm_icons.cpp)
++        OTRACE("kbm_icons");
++        kbm_icons_start();
++        OTRACE("kbm_icons ok"); // ícones de teclado no HUD (kbm_icons.cpp)
+     }
+     // VITART_MEMSNAP=<pasta>:<s1>,<s2>,... (diagnóstico, para achar a vida e a magia): nos segundos pedidos despeja
+     // a memória do guest em <pasta>/t<s> e anota os medidores do HUD (HealthMeter_Value/MagicMeter_Value, +0x14/+0x18
+@@ -532,6 +568,7 @@
+             when.erase(when.begin());
+         }
+     }
++    OTRACE("exibição");
+     // F11 / Alt+Enter também mudam o modo de exibição: a escolha acompanha (vale em todos os módulos)
+     static bool applied_borderless = g_opt.borderless;
+     if (const uint32_t v = g_req_dsp.exchange(0); v == 1 || v == 2) {
+@@ -552,6 +589,7 @@
+     };
+     static const TimeProfile kGow1{0x812b75d0, 0x812b75e0, 0x812bc0c0};
+     static const TimeProfile kGow2{0x812df6d0, 0x812df6e0, 0x812e40e0}; // menu: 1 só no menu principal (memória comparada)
++    OTRACE("tempo");
+     const TimeProfile *tp = is_gow1() ? &kGow1 : is_gow2() ? &kGow2 : nullptr;
+     if (tp) {
+         // VITART_MEMSNAP="q1,q2,...": grava a memória global do jogo (0x81000000..0x81800000, só o mapeado)
+@@ -662,7 +700,7 @@
+     if (const uint32_t v = g_req_res.exchange(0); v >= 1 && v <= 4 && v != cur_scale()) {
+         g_opt.scale = v, changed = true;
+         gvk::set_render_scale(v);
+-        logf("vitart: resolução interna %ux (%ux%u)", v, 960 * v, 544 * v);
++        logf("vitart: resolução interna %ux (%ux%u)", v, 720 * v, 408 * v);
+     }
+     if (const uint32_t v = g_req_asp.exchange(0); v >= 1 && v <= 6 && v != g_opt.aspecto) {
+         g_opt.aspecto = v, changed = true;
+--- a/games/gow/kbm_icons.cpp
++++ b/games/gow/kbm_icons.cpp
+@@ -161,6 +161,9 @@
+ 
+ // liga a thread logo no começo do jogo
+ void kbm_icons_start() {
++#ifdef __SWITCH__
++    return; // sem teclado no Switch; a varredura sem pausa tomava o núcleo da thread do present
++#endif
+     static std::once_flag once;
+     std::call_once(once, [] { std::thread(worker).detach(); });
+ }

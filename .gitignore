@@ -1,0 +1,28 @@
+# saída de compilação
+build/
+*.o
+*.elf
+*.nro
+*.nacp
+*.map
+
+# dados do jogo e arquivos gerados a partir dele: NUNCA versionar
+game/
+PCSA00126/
+out/
+gen/
+*.pkg
+work.bin
+*.spv
+*.pak
+*.psarc
+
+# arte/música do usuário (gerados por tools/make_launcher_assets.ps1)
+launcher/romfs/*
+!launcher/romfs/README.md
+res/
+
+# backups locais
+*.antes_*
+*.orig
+*.rej

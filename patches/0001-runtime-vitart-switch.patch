@@ -1,0 +1,2281 @@
+--- a/runtime/vitart/core.cpp
++++ b/runtime/vitart/core.cpp
+@@ -3,9 +3,17 @@
+ #include "vitart.h"
+ #include "gxm_vk.h"
+ 
++#ifdef __SWITCH__
++#include <switch.h>
++#include <pthread.h>
++#include <strings.h>
++#include <unistd.h>
++#include "nx_platform.h"
++#else
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
+ #include <mmsystem.h>
++#endif
+ 
+ #include <algorithm>
+ #include <chrono>
+@@ -43,6 +51,9 @@
+         fputs(buf, g_logfile);
+         fputc('\n', g_logfile);
+         fflush(g_logfile);
++#ifdef __SWITCH__
++        fsync(fileno(g_logfile)); // grava no cartão já: se o console travar, o log fica até a última linha
++#endif
+     }
+ }
+ 
+@@ -119,6 +130,21 @@
+ static std::string describe_host_pc(const void *pc);
+ static void dump_thread_regs();
+ 
++#ifdef __SWITCH__
++// No Switch a janela do guest é um bloco só, já alocado (mem_init): nada a confirmar.
++void commit_range(uint32_t, uint32_t) {}
++void dump_regions(const std::string &, uint32_t, uint32_t) {}
++static std::string describe_host_pc(const void *) { return "?"; }
++static void dump_thread_regs();
++static void watch_protect(bool) {}
++static uint32_t g_watch_addr = 0, g_watch_len = 0;
++static unsigned g_watch_max = 3;
++static void mem_init() {
++    g_mem = nxp::guest_window();
++    if (!g_mem)
++        fatal("sem memória para a janela do guest");
++}
++#else
+ void commit_range(uint32_t addr, uint32_t size) {
+     if (!size) return;
+     const uint64_t first = (uint64_t)addr & ~0xFFFFull, last = ((uint64_t)addr + size - 1) & ~0xFFFFull;
+@@ -235,6 +261,7 @@
+         fatal("não foi possível reservar 4 GiB de espaço de endereços para o guest");
+     AddVectoredExceptionHandler(1, on_fault);
+ }
++#endif
+ 
+ // Faixas dos alocadores. Todas com o bit 30 zerado, como a memória do usuário no Vita
+ // (0x8xxxxxxx): o God of War guarda uma flag no bit 30 de ponteiros e a apaga ao usá-los.
+@@ -281,7 +308,11 @@
+ // =================================================================== módulos
+ struct Module {
+     std::string path;
++#ifdef __SWITCH__
++    void *lib = nullptr;
++#else
+     HMODULE lib = nullptr;
++#endif
+     const arc_module_info *info = nullptr;
+     const arc_func_entry *funcs = nullptr;
+     unsigned nfuncs = 0;
+@@ -448,6 +479,20 @@
+ static void load_module(const std::string &path) {
+     Module m;
+     m.path = path;
++#ifdef __SWITCH__
++    // Módulos ligados no NRO (nx_modules.cpp): o "caminho" é o nome do módulo (gow1, libc, libfios2).
++    std::string nome = std::filesystem::path(path).stem().string();
++    const nxp::StaticModule *sm = nxp::find_module(nome.c_str());
++    if (!sm)
++        fatal("módulo %s não está no NRO", nome.c_str());
++    auto sym = [&](const char *n) -> void * {
++        if (!std::strcmp(n, "arc_bind")) return reinterpret_cast<void *>(sm->bind);
++        if (!std::strcmp(n, "arc_get_table")) return reinterpret_cast<void *>(sm->get_table);
++        if (!std::strcmp(n, "arc_get_segments")) return reinterpret_cast<void *>(sm->get_segments);
++        if (!std::strcmp(n, "arc_get_module")) return reinterpret_cast<void *>(sm->get_module);
++        fatal("%s não exporta %s", path.c_str(), n);
++    };
++#else
+     m.lib = LoadLibraryA(path.c_str());
+     if (!m.lib)
+         fatal("não foi possível carregar %s (erro %lu)", path.c_str(), GetLastError());
+@@ -457,6 +502,7 @@
+             fatal("%s não exporta %s", path.c_str(), n);
+         return p;
+     };
++#endif
+     auto bind = reinterpret_cast<int (*)(const arc_host_api *, uint8_t *)>(sym("arc_bind"));
+     auto get_table = reinterpret_cast<const arc_func_entry *(*)(unsigned *)>(sym("arc_get_table"));
+     auto get_segs = reinterpret_cast<const arc_segment *(*)(unsigned *)>(sym("arc_get_segments"));
+@@ -482,6 +528,7 @@
+     g_modules.push_back(m);
+ }
+ 
++#ifndef __SWITCH__
+ static std::string describe_host_pc(const void *pc) {
+     const uintptr_t a = reinterpret_cast<uintptr_t>(pc);
+     for (const Module &m : g_modules) {
+@@ -503,6 +550,7 @@
+     }
+     return "código fora dos módulos do guest (runtime/HLE)";
+ }
++#endif
+ 
+ static void dump_thread_regs() {
+     Thread *t = t_current;
+@@ -614,6 +662,11 @@
+ // VITART_PROF=1: amostra a cada 1 ms o RIP de cada thread do guest que gastou CPU desde a amostra anterior
+ // (thread parada em espera não conta) e grava prof.txt a cada 10 s: "amostras módulo+rva thread".
+ // Os RVAs da DLL do jogo viram funções com tools/prof_resolve.py e o mapa do lld-link.
++#ifdef __SWITCH__
++static void prof_register(const Thread *) {}
++void high_res_timer() {}
++static void prof_start() {}
++#else
+ static std::mutex g_prof_mutex;
+ struct ProfThread { HANDLE h; std::string name; ULONG64 cycles = 0; };
+ static std::vector<ProfThread> g_prof_threads;
+@@ -694,6 +747,7 @@
+         }
+     }).detach();
+ }
++#endif
+ 
+ static void thread_main(Thread *t, uint32_t arglen, uint32_t argp) {
+     t_current = t;
+@@ -727,7 +781,7 @@
+         t->ctx.r[13] = sp;
+         copy = sp;
+     }
+-    std::thread(thread_main, t, arglen, copy).detach();
++    spawn_detached([t, arglen, copy] { thread_main(t, arglen, copy); }, t->name.c_str());
+     return 0;
+ }
+ 
+@@ -735,14 +789,14 @@
+     Thread *t = create_thread(name, 0, 0x10000100, 0x10000);
+     if (!t)
+         fatal("sem memória para a thread %s", name);
+-    std::thread([t, body = std::move(body)] {
++    spawn_detached([t, body = std::move(body)] {
+         t_current = t;
+         prof_register(t);
+         t->state = 1;
+         t->ctx.r[14] = 0xFFFFFFF1u;
+         body(t);
+         t->state = 2;
+-    }).detach();
++    }, name);
+     return t;
+ }
+ 
+@@ -795,6 +849,16 @@
+ static std::string g_main_dll;            // DLL do módulo principal (a primeira da lista)
+ const std::string &vt::main_dll_path() { return g_main_dll; }
+ 
++#ifdef __SWITCH__
++[[noreturn]] void vt::exec_main_module(const std::string &dll) {
++    // Um NRO por jogo: a troca de módulo (voltar ao menu da coletânea) encerra o jogo.
++    logf("vitart: LoadExec -> %s (no Switch, sai do jogo)", dll.c_str());
++    if (g_logfile) fflush(g_logfile);
++    audio_silence();
++    nxp::request_exit();
++    exit(0);
++}
++#else
+ [[noreturn]] void vt::exec_main_module(const std::string &dll) {
+     std::string cmd;
+     for (size_t i = 0; i < g_argv.size(); i++) {
+@@ -829,11 +893,27 @@
+     CloseHandle(pi.hProcess);
+     ExitProcess(0);
+ }
++#endif
+ 
+ // Aberto sem argumentos (clique duplo no exe do jogo instalado): tudo relativo à pasta do exe. Com "gow1" ou "gow2"
+ // (os atalhos da Steam, Settings › Steam) abre esse jogo direto, sem o menu do Vita.
+ //   bin\  as DLLs do jogo e o link.hlevars.txt    game\PCSA00126  o app do Vita
+ //   data\ o vitart-data                           shaders\        o cache de shaders    logs\ o registro
++#ifdef __SWITCH__
++// No Switch: tudo em sdmc:/switch/gow-nx/ (game/PCSA00126, data, shaders, logs); o jogo vem do nome do NRO.
++static std::vector<std::string> installed_args(const char *argv0, const char *jogo = nullptr) {
++    const std::string dir = nxp::root_dir();
++    std::error_code ec;
++    std::filesystem::create_directories(dir + "/logs", ec);
++    std::filesystem::create_directories(dir + "/data", ec);
++    setenv("VITART_VULKAN", "1", 0);
++    setenv("VITART_SPV_DIR", (dir + "/shaders").c_str(), 0);
++    const std::string j = jogo ? jogo : nxp::game_name();
++    return {argv0 ? argv0 : "vitart", "--app", dir + "/game/PCSA00126", "--data", dir + "/data", "--log",
++            dir + "/logs/vitart_" + j + ".log", j, "libc", "libfios2"};
++}
++#define _stricmp strcasecmp
++#else
+ static std::vector<std::string> installed_args(const char *argv0, const char *jogo = nullptr) {
+     wchar_t exe[MAX_PATH];
+     GetModuleFileNameW(nullptr, exe, MAX_PATH);
+@@ -853,10 +933,19 @@
+     return {argv0, "--app", "game/PCSA00126", "--data", "data", "--hle-vars", "bin/link.hlevars.txt",
+             "--log", "logs/vitart.log", main_dll, "bin/libc.dll", "bin/libfios2.dll"};
+ }
++#endif
+ 
+ int main(int argc, char **argv) {
+     std::vector<std::string> inst;
+     std::vector<char *> inst_argv;
++#ifdef __SWITCH__
++    nxp::init();
++    nxp::register_main_thread();
++    inst = installed_args(argc > 0 ? argv[0] : nullptr);
++    for (auto &s : inst) inst_argv.push_back(s.data());
++    argc = (int)inst_argv.size();
++    argv = inst_argv.data();
++#endif
+     const bool jogo_direto = argc == 2 && (!_stricmp(argv[1], "gow1") || !_stricmp(argv[1], "gow2"));
+     if ((argc == 1 || jogo_direto) && !(inst = installed_args(argv[0], jogo_direto ? argv[1] : nullptr)).empty()) {
+         for (auto &s : inst) inst_argv.push_back(s.data());
+@@ -882,11 +971,17 @@
+         g_data = g_app + "/../vitart-data";
+     // O exe é de janela (sem console): a janela de cmd só abre com console=1 (o padrão) no ini e quando ninguém
+     // passou saída (aberto pelo Explorer). Com saída redirecionada (testes, o iniciador) ela continua valendo.
++#ifndef __SWITCH__
+     if (ini_flag("console", true) && !GetStdHandle(STD_ERROR_HANDLE) && AllocConsole()) {
+         freopen("CONOUT$", "w", stdout);
+         freopen("CONOUT$", "w", stderr);
+     }
++#endif
+     if (!log_path.empty() && ini_flag("log", true)) g_logfile = fopen(log_path.c_str(), "w");
++#ifdef __SWITCH__
++    logf("vitart (Switch): %s, app %s, dados %s", nxp::game_name(), g_app.c_str(), g_data.c_str());
++    nxp::set_clocks();
++#endif
+     if (const char *tr = getenv("VITART_TRACE")) {
+         g_trace = true;
+         std::string f = tr;
+@@ -903,6 +998,11 @@
+     mem_init();
+     for (const std::string &d : dlls)
+         load_module(d);
++#ifdef __SWITCH__
++    // link.hlevars.txt do plano do GoW (igual para gow1 e gow2): só a área de variáveis do kernel.
++    map_region(0x80f00000u, 16, "var:__stack_chk_guard");
++    logf("vitart: variável do sistema SceLibKernel:__stack_chk_guard em 0x80f00000");
++#endif
+     if (!hle_vars.empty())
+         load_hle_vars(hle_vars);
+     link_imports();
+@@ -928,7 +1028,7 @@
+     const uint32_t stack = stack_p ? rd32(stack_p) : 0x40000;
+     logf("vitart: thread principal: prioridade 0x%x, pilha 0x%x, entrada 0x%08x", prio, stack, mi->module_start);
+ 
+-    Thread *main_thread = create_thread("main", mi->module_start, prio, stack);
++    vt::Thread *main_thread = create_thread("main", mi->module_start, prio, stack);
+     if (!main_thread)
+         fatal("não foi possível criar a thread principal");
+ 
+@@ -938,7 +1038,7 @@
+         const arc_module_info *li = g_modules[i].info;
+         if (!li->module_start)
+             continue;
+-        Thread *lt = create_thread((std::string("module_start:") + li->name).c_str(), li->module_start, prio, 0x10000);
++        vt::Thread *lt = create_thread((std::string("module_start:") + li->name).c_str(), li->module_start, prio, 0x10000);
+         if (!lt)
+             fatal("sem memória para a thread de module_start de %s", li->name);
+         start_thread(lt, 0, 0);
+--- a/runtime/vitart/gxm_api.inc
++++ b/runtime/vitart/gxm_api.inc
+@@ -18,6 +18,10 @@
+ void notify(const std::string &text);
+ bool is_target(uint32_t addr);
+ bool is_depth(uint32_t addr);
++// is_target/is_depth numa consulta só: 0 nada, 1 alvo de cor, 2 superfície de profundidade.
++int target_kind(uint32_t addr);
++// Espera as cópias adiadas do anel (dados na memória do guest) terminarem: antes de o jogo poder reusar os buffers.
++void sync_copies();
+ // Início de cena do GXM: a profundidade do alvo volta ao valor de fundo (1,0), a não ser que a
+ // superfície peça "force load". Sem isso a profundidade de uma cena vaza para a seguinte.
+ void begin_scene(uint32_t color_addr, uint8_t stencil = 0);
+--- a/runtime/vitart/gxm_backend.cpp
++++ b/runtime/vitart/gxm_backend.cpp
+@@ -32,6 +32,10 @@
+ 
+ // tenta o Vulkan primeiro; se o PC torcer o nariz, vai de DX11 mesmo
+ bool init(bool validation, bool window) {
++#ifdef __SWITCH__
++    g_backend = Backend::vulkan; // só Vulkan (NVK)
++    return vkb::init(validation, window);
++#endif
+     if (g_want != "d3d11") {
+         if (LoadLibraryA("vulkan-1.dll")) {
+             g_backend = Backend::vulkan;
+@@ -48,7 +52,11 @@
+ }
+ 
+ // daqui pra baixo é tudo repasse, nada de emocionante
++#ifdef __SWITCH__
++#define TO(f, ...) (vkb::f(__VA_ARGS__))
++#else
+ #define TO(f, ...) (g_backend == Backend::d3d11 ? dx11::f(__VA_ARGS__) : vkb::f(__VA_ARGS__))
++#endif
+ 
+ bool vertex_format_ok(uint32_t fmt, uint32_t comps) { return TO(vertex_format_ok, fmt, comps); }
+ bool present(uint32_t addr) { return TO(present, addr); }
+@@ -59,6 +67,8 @@
+ void notify(const std::string &text) { TO(notify, text); }
+ bool is_target(uint32_t addr) { return TO(is_target, addr); }
+ bool is_depth(uint32_t addr) { return TO(is_depth, addr); }
++int target_kind(uint32_t addr) { return TO(target_kind, addr); }
++void sync_copies() { TO(sync_copies); }
+ void begin_scene(uint32_t color_addr, uint8_t stencil) { TO(begin_scene, color_addr, stencil); }
+ void shutdown() { TO(shutdown); }
+ uint32_t render_scale() { return TO(render_scale); }
+--- a/runtime/vitart/gxm_vk.cpp
++++ b/runtime/vitart/gxm_vk.cpp
+@@ -7,6 +7,10 @@
+ // ler um alvo ou quando o anel enche.
+ #include "gxm_vk.h"
+ namespace vt { void logf(const char *fmt, ...); } // vitart.h (o registro do vitart)
++#ifdef __SWITCH__
++#include <functional>
++namespace vt { void spawn_detached(std::function<void()> fn, const char *name); } // nx_platform.cpp
++#endif
+ #include "game.h"
+ #include "gxm_overlay.h"
+ #include "gxm_window.h"
+@@ -14,16 +18,30 @@
+ #include "trophy_banner.h"
+ #include "post_shaders.h"
+ 
++#ifdef __SWITCH__
++// Switch: libnvk (NVK) sem loader; as funções vêm do ICD via Volk e a superfície é a NWindow (VK_NN_vi_surface).
++#include <switch.h>
++#define VK_USE_PLATFORM_VI_NN
++#define VK_NO_PROTOTYPES
++#include <vulkan/vulkan.h>
++#include "volk.h"
++#include <windows.h> // shim (nx/shim)
++extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(VkInstance, const char *);
++#else
+ #define WIN32_LEAN_AND_MEAN
+ #define NOMINMAX
+ #include <windows.h>
+ #define VK_USE_PLATFORM_WIN32_KHR
+ #include <vulkan/vulkan.h>
++#endif
+ 
+ #include <algorithm>
+ #include <atomic>
+ #include <chrono>
++#include <condition_variable>
++#include <functional>
+ #include <mutex>
++#include <thread>
+ 
+ #include <cstdio>
+ #include <cstdlib>
+@@ -61,7 +79,11 @@
+ std::recursive_mutex g_lock; // desenhos vêm da thread de render do jogo, a apresentação da de vídeo
+ 
+ // Swapchain na janela comum (gxm_window.cpp), só com init(..., true).
++#ifdef __SWITCH__
++void *g_hwnd = nullptr;
++#else
+ HWND g_hwnd = nullptr;
++#endif
+ VkSurfaceKHR g_surface = VK_NULL_HANDLE;
+ VkSwapchainKHR g_swap = VK_NULL_HANDLE;
+ std::vector<VkImage> g_swap_images;
+@@ -76,33 +98,46 @@
+ constexpr VkImageAspectFlags kDepthAspects = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+ 
+ Stats g_stats;
++void rec_sync(); // esvazia a fila da thread de gravação (mais abaixo) antes de gravar direto no command buffer
+ // Resolução interna: os alvos do jogo são renderizados em escala x (VITART_VK_SCALE, padrão 2).
+ // Viewport, scissor e o deslocamento de meio pixel escalam junto; texturas lidas de alvos usam
+ // coordenadas normalizadas e não mudam.
+ // Sem VITART_VK_SCALE, a escala acompanha o monitor: a altura nativa do GoW (408) vezes a escala cobre a
+ // altura da tela (1080p -> 3, 1440p -> 4), e a apresentação reduz com filtro (supersampling).
+ uint32_t g_scale_override = 0; // escolhida no menu do jogo (set_render_scale)
+-uint32_t scale_auto() {
+-    static const uint32_t s = [] {
++float scale_auto() {
++    static const float s = [] {
+         const char *e = getenv("VITART_VK_SCALE");
+         int v = e ? std::atoi(e) : 0;
++#ifdef __SWITCH__
++        // Switch: padrão 1x (720x408, a apresentação amplia). Na resolução da tela (1,76x portátil, 2,65x na
++        // base) a GPU não segura o fps; continua disponível com VITART_VK_SCALE=-1.
++        if (!v) return 1.f;
++        if (v < 0) {
++            const float sh = appletGetOperationMode() == AppletOperationMode_Console ? 1080.f : 720.f;
++            vt::logf("vk: resolução interna nativa do Switch: %.3fx (%ux%u)", sh / 408.f, (unsigned)(720 * sh / 408.f + 0.5f),
++                     (unsigned)sh);
++            return sh / 408.f;
++        }
++#endif
+         if (!v) {
+             const int mh = GetSystemMetrics(SM_CYSCREEN);
+             v = (mh + 407) / 408;
+             v = v < 2 ? 2 : v > 4 ? 4 : v;
+         }
+-        return (uint32_t)(v < 1 ? 1 : v > 8 ? 8 : v);
++        return (float)(v < 1 ? 1 : v > 8 ? 8 : v);
+     }();
+     return s;
+ }
+-uint32_t scale_now() { return g_scale_override ? g_scale_override : scale_auto(); }
++float scale_now() { return g_scale_override ? (float)g_scale_override : scale_auto(); }
++uint32_t scaled(uint32_t g, float s) { const uint32_t v = (uint32_t)(g * s + 0.5f); return v ? v : 1; }
+ // Ultrawide: os alvos com cara de tela (720x408, as metades e quartos usados nos passes de tela cheia) ficam g_widen
+ // vezes mais largos no host; o jogo desenha com a proporção maior (game_options.cpp escreve o aspecto da câmera) e
+ // os 720 pixels do guest se espalham pela largura nova. Sombras e alvos quadrados ficam como estão.
+ float g_widen = 1.f;
+ bool alvo_de_tela(uint32_t gw, uint32_t gh) { return gh && gw * 100 >= gh * 170 && gw * 100 <= gh * 182; }
+-uint32_t host_w(uint32_t gw, uint32_t gh, uint32_t s, float widen) {
+-    return alvo_de_tela(gw, gh) && widen != 1.f ? ((uint32_t)(gw * s * widen + 1.f) & ~1u) : gw * s;
++uint32_t host_w(uint32_t gw, uint32_t gh, float s, float widen) {
++    return alvo_de_tela(gw, gh) && widen != 1.f ? ((uint32_t)(gw * s * widen + 1.f) & ~1u) : scaled(gw, s);
+ }
+ float g_aniso = 1.f;                         // anisotropia máxima dos samplers (1 = desligada)
+ VkPipelineCache g_pcache = VK_NULL_HANDLE;   // persistido em vk_pipeline_cache.bin
+@@ -136,6 +171,10 @@
+     char b[160];
+     std::snprintf(b, sizeof b, "%s falhou (VkResult %d)", what, (int)r);
+     g_err = b;
++#ifdef __SWITCH__
++    static int n = 0;
++    if (n++ < 20) vt::logf("vk: %s", b);
++#endif
+     return false;
+ }
+ #define VKC(call)                                   \
+@@ -181,6 +220,7 @@
+ }
+ 
+ void destroy(Buffer &b) {
++    rec_sync();
+     if (b.buf) vkDestroyBuffer(g_dev, b.buf, nullptr);
+     if (b.mem) vkFreeMemory(g_dev, b.mem, nullptr);
+     b = {};
+@@ -230,6 +270,7 @@
+ }
+ 
+ void destroy(Image &im) {
++    rec_sync();
+     if (im.view) vkDestroyImageView(g_dev, im.view, nullptr);
+     if (im.att_view) vkDestroyImageView(g_dev, im.att_view, nullptr);
+     if (im.img) vkDestroyImage(g_dev, im.img, nullptr);
+@@ -239,6 +280,7 @@
+ 
+ void barrier(Image &im, VkImageLayout to) {
+     if (im.layout == to) return;
++    rec_sync();
+     VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+     b.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+     b.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+@@ -271,7 +313,20 @@
+ std::unordered_map<uint64_t, VkDescriptorSet> g_tex_sets;
+ bool g_tex_sets_stale = false;
+ 
++// Último estado gravado no command buffer: desenhos seguidos com o mesmo pipeline, viewport, scissor e stencil
++// não repetem as chamadas (no NVK cada vkCmd* custa CPU). Zera ao começar o command buffer e a cada render pass.
++struct CmdState {
++    bool valid = false;
++    VkPipeline pipe = VK_NULL_HANDLE;
++    VkViewport vp{};
++    VkRect2D sc{};
++    uint32_t sten[6] = {};
++};
++CmdState g_cs;
++
+ bool begin_cmd() {
++    rec_sync();
++    g_cs = {};
+     VKC(vkResetCommandBuffer(g_cmd, 0));
+     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+@@ -284,6 +339,7 @@
+ }
+ 
+ bool submit_wait() {
++    rec_sync();
+     VKC(vkEndCommandBuffer(g_cmd));
+     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+     si.commandBufferCount = 1;
+@@ -320,18 +376,199 @@
+ uint64_t g_frame_no = 0;                            // quadros de gravação (frame_begin) desde o início
+ std::vector<float> g_debug_vs; // cópias de alvos lidas como textura: vivem até o fim do quadro
+ 
+-void end_pass() {
++// ------------------------------------------------------------- gravação em outra thread
++// No NVK cada vkCmd* custa CPU (~6 ms por quadro com 800 desenhos). Os desenhos (e o abrir/fechar do render pass)
++// viram registros compactos numa fila, e uma thread em outro núcleo os grava no command buffer enquanto o jogo
++// segue. Tudo o mais (cópias, barreiras, limpezas, envio, apresentação, destruir recursos) grava direto depois de
++// rec_sync() esvaziar a fila: o command buffer (e o pool dele) nunca é usado pelas duas threads ao mesmo tempo, e a
++// ordem dos comandos é a mesma de antes. VITART_VK_THREAD=0 grava tudo na thread do jogo, como antes.
++struct RecCopy {
++    uint8_t *dst;
++    const void *src;
++    uint32_t n;
++};
++struct RecOp {
++    uint32_t ncp = 0;   // desenho: cópias adiadas para o anel (feitas pela thread de gravação antes de gravar)
++    RecCopy cp[19];
++    uint32_t kind = 0;  // 0 desenho, 1 começa render pass, 2 termina render pass
++    uint32_t flags = 0; // desenho: 1 pipeline, 2 viewport, 4 scissor, 8 PBR, bits 16..21 stencil
++    VkCommandBuffer cmd = VK_NULL_HANDLE;
++    VkPipeline pipe = VK_NULL_HANDLE;
++    VkDescriptorSet sets[3] = {};
++    uint32_t dyn[4] = {};
++    VkViewport vp{};
++    VkRect2D sc{};
++    uint32_t sten[6] = {};
++    VkDescriptorSet s34[2] = {};
++    uint32_t poff = 0;
++    uint32_t na = 0;
++    VkIndexType itype = VK_INDEX_TYPE_UINT32;
++    uint32_t index_count = 0;
++    int32_t vertex_offset = 0;
++    VkDeviceSize ioff = 0;
++    VkDeviceSize voff[16] = {};
++    VkFramebuffer fb = VK_NULL_HANDLE; // render pass
++    uint32_t w = 0, h = 0;
++};
++constexpr uint32_t kRecCap = 4096;
++RecOp *g_rq = nullptr;
++RecOp g_rq_local; // gravação na própria thread (fila desligada)
++bool g_rec_on = false;
++std::atomic<uint32_t> g_rq_head{0}, g_rq_tail{0};
++std::atomic<bool> g_rq_sleep{false}, g_rq_wait{false};
++std::mutex g_rq_m;
++std::condition_variable g_rq_work, g_rq_done;
++std::atomic<uint64_t> g_rec_ns{0}, g_sync_ns{0};
++
++void rec_exec(const RecOp &o) {
++    const VkCommandBuffer c = o.cmd;
++    if (o.kind == 1) {
++        VkRenderPassBeginInfo rbi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
++        rbi.renderPass = g_rp;
++        rbi.framebuffer = o.fb;
++        rbi.renderArea = {{0, 0}, {o.w, o.h}};
++        vkCmdBeginRenderPass(c, &rbi, VK_SUBPASS_CONTENTS_INLINE);
++        return;
++    }
++    if (o.kind == 2) {
++        vkCmdEndRenderPass(c);
++        return;
++    }
++    for (uint32_t i = 0; i < o.ncp; i++) std::memcpy(o.cp[i].dst, o.cp[i].src, o.cp[i].n);
++    if (o.flags & 1) vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, o.pipe);
++    vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 0, 3, o.sets, 4, o.dyn);
++    if (o.flags & 2) vkCmdSetViewport(c, 0, 1, &o.vp);
++    if (o.flags & 8) vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 3, 2, o.s34, 1, &o.poff);
++    if (o.flags & 4) vkCmdSetScissor(c, 0, 1, &o.sc);
++    if (o.flags & (1u << 16)) vkCmdSetStencilCompareMask(c, VK_STENCIL_FACE_FRONT_BIT, o.sten[0]);
++    if (o.flags & (1u << 17)) vkCmdSetStencilCompareMask(c, VK_STENCIL_FACE_BACK_BIT, o.sten[1]);
++    if (o.flags & (1u << 18)) vkCmdSetStencilWriteMask(c, VK_STENCIL_FACE_FRONT_BIT, o.sten[2]);
++    if (o.flags & (1u << 19)) vkCmdSetStencilWriteMask(c, VK_STENCIL_FACE_BACK_BIT, o.sten[3]);
++    if (o.flags & (1u << 20)) vkCmdSetStencilReference(c, VK_STENCIL_FACE_FRONT_BIT, o.sten[4]);
++    if (o.flags & (1u << 21)) vkCmdSetStencilReference(c, VK_STENCIL_FACE_BACK_BIT, o.sten[5]);
++    if (o.na) {
++        VkBuffer bufs[16];
++        for (uint32_t k = 0; k < o.na; k++) bufs[k] = g_ring.buf;
++        vkCmdBindVertexBuffers(c, 0, o.na, bufs, o.voff);
++    }
++    vkCmdBindIndexBuffer(c, g_ring.buf, o.ioff, o.itype);
++    vkCmdDrawIndexed(c, o.index_count, 1, 0, o.vertex_offset, 0);
++}
++
++void rec_worker() {
++    uint32_t t = g_rq_tail.load();
++    for (;;) {
++        uint32_t h = g_rq_head.load();
++        if (h == t) {
++            // fila vazia: espera ativa curta (o próximo desenho chega em dezenas de µs), depois dorme
++            const uint64_t until = now_ns() + 60000;
++            while ((h = g_rq_head.load(std::memory_order_acquire)) == t && now_ns() < until) {
++            }
++            if (h == t) {
++                std::unique_lock<std::mutex> lk(g_rq_m);
++                g_rq_sleep.store(true);
++                while ((h = g_rq_head.load()) == t) g_rq_work.wait(lk);
++                g_rq_sleep.store(false);
++            }
++        }
++        const uint64_t t0 = now_ns();
++        while (t != h) {
++            rec_exec(g_rq[t % kRecCap]);
++            g_rq_tail.store(++t);
++            if (t == h) h = g_rq_head.load(std::memory_order_acquire);
++        }
++        g_rec_ns += now_ns() - t0;
++        if (g_rq_wait.load()) {
++            std::lock_guard<std::mutex> lk(g_rq_m);
++            g_rq_done.notify_one();
++        }
++    }
++}
++
++void rec_sync() {
++    if (!g_rec_on) return;
++    const uint32_t h = g_rq_head.load(std::memory_order_relaxed);
++    if (g_rq_tail.load(std::memory_order_acquire) == h) return;
++    const uint64_t t0 = now_ns();
++    std::unique_lock<std::mutex> lk(g_rq_m);
++    if (g_rq_sleep.load()) g_rq_work.notify_one();
++    g_rq_wait.store(true);
++    while (g_rq_tail.load() != h) g_rq_done.wait(lk);
++    g_rq_wait.store(false);
++    g_sync_ns += now_ns() - t0;
++}
++
++// Vaga para o próximo registro (só a thread que tem g_lock grava na fila); rec_commit publica.
++RecOp &rec_slot() {
++    if (!g_rec_on) return g_rq_local = RecOp{};
++    const uint32_t h = g_rq_head.load(std::memory_order_relaxed);
++    if (h - g_rq_tail.load(std::memory_order_acquire) >= kRecCap) rec_sync();
++    return g_rq[h % kRecCap] = RecOp{};
++}
++void rec_commit() {
++    if (!g_rec_on) {
++        rec_exec(g_rq_local);
++        return;
++    }
++    const uint32_t h = g_rq_head.load(std::memory_order_relaxed) + 1;
++    g_rq_head.store(h);
++    // Com a gravadora dormindo, só a acorda com 8 registros pendentes (rec_sync acorda para o resto): menos idas ao
++    // kernel por desenho na thread Render.
++    if (g_rq_sleep.load() && h - g_rq_tail.load(std::memory_order_relaxed) >= 8) {
++        std::lock_guard<std::mutex> lk(g_rq_m);
++        g_rq_work.notify_one();
++    }
++}
++
++void rec_start() {
++    const char *e = getenv("VITART_VK_THREAD");
++    if (e && *e == '0') {
++        vt::logf("vk: gravação na thread do jogo (VITART_VK_THREAD=0)");
++        return;
++    }
++    g_rq = new RecOp[kRecCap];
++    g_rec_on = true;
++#ifdef __SWITCH__
++    vt::spawn_detached(rec_worker, "gravacao vk");
++#else
++    std::thread(rec_worker).detach();
++#endif
++    vt::logf("vk: gravação de comandos em thread separada");
++}
++
++// Fecha o render pass aberto pela fila (dentro de draw); end_pass também espera a fila, para quem grava direto depois.
++void end_pass_q() {
++    g_cs = {};
+     if (g_open) {
+-        vkCmdEndRenderPass(g_cmd);
++        RecOp &o = rec_slot();
++        o.kind = 2;
++        o.cmd = g_cmd;
++        rec_commit();
+         g_open = nullptr;
+     }
+ }
++void end_pass() {
++    end_pass_q();
++    rec_sync();
++}
+ 
+ bool slot_wait(uint32_t i) {
+     if (!g_pend[i]) return true;
+     {
+         Timer tm(g_stats.wait_ns);
++#ifdef __SWITCH__
++        for (int t = 0;; t++) {
++            const VkResult r = vkWaitForFences(g_dev, 1, &g_fences[i], VK_TRUE, 2000000000ull);
++            if (r == VK_SUCCESS) {
++                if (t) vt::logf("vk: cerca %u sinalizou depois de %d s", i, 2 * t);
++                break;
++            }
++            vt::logf("vk: cerca %u sem sinal após %d s (VkResult %d)", i, 2 * (t + 1), (int)r);
++            if (r != VK_TIMEOUT) VKC(r);
++        }
++#else
+         VKC(vkWaitForFences(g_dev, 1, &g_fences[i], VK_TRUE, UINT64_MAX));
++#endif
+     }
+     if (g_tsopen[i]) {
+         uint64_t ts[2] = {};
+@@ -421,6 +658,7 @@
+ bool frame_flush(bool wait) {
+     if (g_recording) {
+         end_pass();
++        rec_sync();
+         if (g_qpool) vkCmdWriteTimestamp(g_cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_qpool, 2 * g_fi + 1);
+         g_tsopen[g_fi] = g_qpool != VK_NULL_HANDLE;
+         VKC(vkEndCommandBuffer(g_cmd));
+@@ -459,6 +697,18 @@
+     return at;
+ }
+ 
++// Como ring_put, mas dado do guest com a thread de gravação ligada: só reserva, e a cópia vai junto do registro.
++VkDeviceSize ring_put_g(const void *data, VkDeviceSize n, VkDeviceSize align, bool guest, RecCopy *cp, uint32_t &ncp) {
++    static const bool async = !(getenv("VITART_VK_ASYNC_COPY") && *getenv("VITART_VK_ASYNC_COPY") == '0');
++    if (!guest || !async || !g_rec_on || !data || !n) return ring_put(data, n, align);
++    Timer tm(g_stats.ring_ns);
++    g_ring_off = (g_ring_off + align - 1) & ~(align - 1);
++    const VkDeviceSize at = g_ring_base + g_ring_off;
++    cp[ncp++] = {g_ring_ptr + at, data, (uint32_t)n};
++    g_ring_off += n;
++    return at;
++}
++
+ bool get_target(uint32_t addr, uint32_t w, uint32_t h, Target *&out) {
+     auto it = g_targets.find(addr);
+     if (it != g_targets.end()) {
+@@ -467,7 +717,7 @@
+     }
+     Target t;
+     t.gw = w, t.gh = h;
+-    w = host_w(w, h, scale_now(), g_widen), h *= scale_now();
++    w = host_w(w, h, scale_now(), g_widen), h = scaled(h, scale_now());
+     if (!make_image(t.color, w, h, kColor,
+                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                         VK_IMAGE_USAGE_STORAGE_BIT))
+@@ -526,6 +776,7 @@
+ uint64_t ver_proprio(const Target &t) { return 1ull << 63 | t.cena; }
+ // Copia src para a cópia sn (cria na primeira vez). Fora de render pass.
+ bool copiar_snap(Snap &sn, Image &src, bool depth, uint64_t ver) {
++    rec_sync();
+     Image &snap = sn.im;
+     if (!snap.img && !make_image(snap, src.w, src.h, src.fmt, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT))
+         return false;
+@@ -584,6 +835,7 @@
+ // Grava o envio no quadro atual (o chamador já reservou os bytes no anel).
+ // Barreira de um único nível (geração de mipmaps).
+ void level_barrier(Image &im, uint32_t level, VkImageLayout from, VkImageLayout to) {
++    rec_sync();
+     VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+     b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+     b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+@@ -602,6 +854,7 @@
+ }
+ 
+ bool upload_texture(Image &im, uint32_t w, uint32_t h, const uint8_t *rgba, bool mipmapped = false) {
++    rec_sync();
+     const uint32_t mips = mipmapped ? mip_levels(w, h) : 1;
+     if (!make_image(im, w, h, kColor,
+                     VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, mips))
+@@ -768,8 +1021,11 @@
+     for (const VertexAttr &a : d.raw_attrs)
+         layout = (layout ^ (a.location | a.stream << 5 | a.offset << 10 | a.fmt << 20 | a.comps << 25)) * 1099511628211ull;
+     auto key = std::make_tuple(vs, fs, layout, blend, depth, d.cull, sten);
++    static decltype(key) last_key{};
++    static VkPipeline last_pipe = VK_NULL_HANDLE;
++    if (last_pipe && key == last_key) return last_pipe;
+     auto it = g_pipes.find(key);
+-    if (it != g_pipes.end()) return it->second;
++    if (it != g_pipes.end()) return last_key = key, last_pipe = it->second;
+     Timer tm(g_stats.pipe_ns);
+     g_stats.pipes++;
+ 
+@@ -896,6 +1152,11 @@
+ 
+ 
+ // Swapchain do tamanho atual da janela (recriada ao redimensionar, entrar/sair da tela cheia, restaurar).
++#ifdef __SWITCH__
++#define VK_STEP(s) vt::logf("vk: %s", s)
++#else
++#define VK_STEP(s) ((void)0)
++#endif
+ static bool create_swapchain() {
+     VkSurfaceCapabilitiesKHR caps;
+     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_phys, g_surface, &caps);
+@@ -907,6 +1168,16 @@
+     for (auto &f : fmts)
+         if (f.format == VK_FORMAT_B8G8R8A8_UNORM) fmt = f;
+     g_swap_extent = caps.currentExtent.width != UINT32_MAX ? caps.currentExtent : VkExtent2D{1440, 816};
++#ifdef __SWITCH__
++    {
++        // O WSI do Switch não informa o tamanho: vale o da NWindow (1280x720 portátil, 1920x1080 na base).
++        int x, y, w, h;
++        if (win::rect(x, y, w, h)) g_swap_extent = VkExtent2D{(uint32_t)w, (uint32_t)h};
++        vt::logf("vk: swapchain %ux%u (currentExtent %ux%u, min %ux%u, max %ux%u)", g_swap_extent.width, g_swap_extent.height,
++                 caps.currentExtent.width, caps.currentExtent.height, caps.minImageExtent.width, caps.minImageExtent.height,
++                 caps.maxImageExtent.width, caps.maxImageExtent.height);
++    }
++#endif
+     if (!g_swap_extent.width || !g_swap_extent.height) return true; // minimizada: recria quando voltar
+     VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
+     ci.surface = g_surface;
+@@ -946,6 +1217,7 @@
+     ci.oldSwapchain = g_swap;
+     VkSwapchainKHR sw = VK_NULL_HANDLE;
+     VKC(vkCreateSwapchainKHR(g_dev, &ci, nullptr, &sw));
++    VK_STEP("swapchain ok");
+     if (g_swap) vkDestroySwapchainKHR(g_dev, g_swap, nullptr);
+     g_swap = sw;
+     uint32_t ni = 0;
+@@ -967,11 +1239,19 @@
+         g_err = "CreateWindowEx falhou";
+         return false;
+     }
++#ifdef __SWITCH__
++    g_hwnd = win::hwnd();
++    VkViSurfaceCreateInfoNN si{VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN};
++    si.window = g_hwnd;
++    VKC(vkCreateViSurfaceNN(g_inst, &si, nullptr, &g_surface));
++    VK_STEP("surface ok");
++#else
+     g_hwnd = static_cast<HWND>(win::hwnd());
+     VkWin32SurfaceCreateInfoKHR si{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
+     si.hinstance = GetModuleHandleW(nullptr);
+     si.hwnd = g_hwnd;
+     VKC(vkCreateWin32SurfaceKHR(g_inst, &si, nullptr, &g_surface));
++#endif
+     VkBool32 ok = VK_FALSE;
+     vkGetPhysicalDeviceSurfaceSupportKHR(g_phys, g_qfam, g_surface, &ok);
+     if (!ok) {
+@@ -1049,6 +1329,17 @@
+     return g_depth_owner.count(addr) != 0;
+ }
+ 
++int target_kind(uint32_t addr) {
++    std::lock_guard<std::recursive_mutex> lock(g_lock);
++    if (g_targets.count(addr)) return 1;
++    return g_depth_owner.count(addr) ? 2 : 0;
++}
++
++void sync_copies() {
++    std::lock_guard<std::recursive_mutex> lock(g_lock);
++    rec_sync();
++}
++
+ void post_save_depth(uint32_t addr, Image &dep); // iluminação de tela (mais abaixo)
+ 
+ void begin_scene(uint32_t color_addr, uint8_t stencil) {
+@@ -1076,6 +1367,7 @@
+     std::lock_guard<std::recursive_mutex> lock(g_lock);
+     auto it = g_targets.find(color_addr);
+     if (!g_dev || !n || it == g_targets.end()) return;
++    rec_sync();
+     Image &im = it->second.color;
+     if (!frame_reserve(n * ((VkDeviceSize)im.h * im.h / 64 * 4 + 64 * 1024))) return;
+     end_pass();
+@@ -1147,13 +1439,19 @@
+ void set_post_bypass(bool on);
+ 
+ bool present(uint32_t addr) {
+-    std::lock_guard<std::recursive_mutex> lock(g_lock);
++    std::unique_lock<std::recursive_mutex> lock(g_lock);
+     if (!g_dev) return false;
++    rec_sync();
++    static int pt = 0;
++    if (pt < 3) VK_STEP("present: post_at_present");
+     post_at_present(addr);
+     g_dw_last = g_dw_frame.exchange(0);
++    if (pt < 3) VK_STEP("present: frame_flush");
+     // O quadro vai para a fila sem esperar; o blit vem depois na mesma fila, que garante a ordem.
+     if (!frame_flush(false)) return false;
+-    if (!g_swap && !g_hwnd && !create_window()) return false;
++    if (pt < 3) VK_STEP(g_swap ? "present: swapchain existe" : "present: criando janela");
++    pt++;
++    if (!g_swap && !g_hwnd && !create_window()) { vt::logf("vk: create_window falhou: %s", g_err.c_str()); return false; }
+     if (!g_swap) return false;
+     win::pump();
+     auto it = g_targets.find(addr);
+@@ -1163,22 +1461,37 @@
+         if (!create_swapchain()) return false;
+     }
+     if (!g_swap_extent.width || !g_swap_extent.height) return true; // minimizada
++    // As esperas (fim da apresentação anterior e imagem livre da swapchain, que segue o vsync) correm sem g_lock:
++    // a thread Render do jogo continua montando o quadro seguinte em vez de ficar parada no lock.
++    const Image snap = it->second.color;
++    const VkSwapchainKHR swap = g_swap;
++    lock.unlock();
+     // a apresentação anterior (o envio que esperou g_acquired) tem de ter acabado ANTES de reusar g_acquired
+     // (VUID-vkAcquireNextImageKHR-semaphore-01779)
+-    VKC(vkWaitForFences(g_dev, 1, &g_pfence, VK_TRUE, UINT64_MAX));
++    VkResult r = vkWaitForFences(g_dev, 1, &g_pfence, VK_TRUE, UINT64_MAX);
+     uint32_t idx = 0;
+-    VkResult r = vkAcquireNextImageKHR(g_dev, g_swap, UINT64_MAX, g_acquired, VK_NULL_HANDLE, &idx);
++    if (r == VK_SUCCESS) r = vkAcquireNextImageKHR(g_dev, swap, UINT64_MAX, g_acquired, VK_NULL_HANDLE, &idx);
++    lock.lock();
+     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
+         win::mark_resized();
+         return true;
+     }
+     if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) return fail("vkAcquireNextImageKHR", r);
++    if (!g_dev || g_swap != swap) return false;
++    // Se a Render mexeu no alvo apresentado nesse intervalo, os comandos dela ainda não foram enviados: envia
++    // antes, para o layout registrado valer na hora do blit.
++    rec_sync();
++    it = g_targets.find(addr);
++    if (it != g_targets.end() && (it->second.color.img != snap.img || it->second.color.layout != snap.layout) &&
++        !frame_flush(false))
++        return false;
+     VKC(vkResetCommandBuffer(g_pcmd, 0));
+     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+     VKC(vkBeginCommandBuffer(g_pcmd, &bi));
+     g_cur = g_pcmd;
+-    Image *srcp = &it->second.color;
++    Image none{};
++    Image *srcp = it != g_targets.end() ? &it->second.color : &none;
+     if (g_vid_px) {
+         const VkDeviceSize bytes = (VkDeviceSize)g_vid_w * g_vid_h * 4;
+         bool ok = true;
+@@ -1207,7 +1520,7 @@
+     Image dst;
+     dst.img = g_swap_images[idx];
+     dst.fmt = VK_FORMAT_B8G8R8A8_UNORM;
+-    barrier(src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
++    if (src.img) barrier(src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+     // Proporção do jogo preservada: a imagem ocupa o maior retângulo centrado; o resto fica preto.
+     const VkClearColorValue black{};
+@@ -1222,7 +1535,7 @@
+         mb.subresourceRange = all;
+         vkCmdPipelineBarrier(g_pcmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &mb);
+     }
+-    const double sw = g_swap_extent.width, sh = g_swap_extent.height, sa = (double)src.w / src.h;
++    const double sw = g_swap_extent.width, sh = g_swap_extent.height, sa = src.img && src.h ? (double)src.w / src.h : sw / sh;
+     int32_t dw = (int32_t)sw, dh = (int32_t)(sw / sa + 0.5);
+     if (dh > (int32_t)sh) dh = (int32_t)sh, dw = (int32_t)(sh * sa + 0.5);
+     const int32_t dx = ((int32_t)sw - dw) / 2, dy = ((int32_t)sh - dh) / 2;
+@@ -1231,12 +1544,13 @@
+     b.srcOffsets[1] = {(int32_t)src.w, (int32_t)src.h, 1};
+     b.dstOffsets[0] = {dx, dy, 0};
+     b.dstOffsets[1] = {dx + dw, dy + dh, 1};
+-    vkCmdBlitImage(g_pcmd, src.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b,
+-                   VK_FILTER_LINEAR);
++    if (src.img)
++        vkCmdBlitImage(g_pcmd, src.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b,
++                       VK_FILTER_LINEAR);
+     const int32_t margin = (int32_t)(g_swap_extent.height / 60);
+     overlay_fps(dst.img, dx + margin, dy + margin);
+     overlay_banner(dst.img, dx, dy, dw, dh);
+-    if (srcp == &it->second.color) barrier(src, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
++    if (srcp != &g_vid_img && src.img) barrier(src, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+     barrier(dst, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+     g_cur = g_cmd;
+     VKC(vkEndCommandBuffer(g_pcmd));
+@@ -1277,14 +1591,34 @@
+         ici.enabledLayerCount = 1;
+         ici.ppEnabledLayerNames = &layer;
+     }
++#ifdef __SWITCH__
++    static bool volk_ok = false;
++    if (!volk_ok) {
++        volkInitializeCustom(vk_icdGetInstanceProcAddr);
++        volk_ok = true;
++    }
++    validation = false; // sem camadas no Switch
++    const char *iext[2] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_NN_VI_SURFACE_EXTENSION_NAME};
++#else
+     const char *iext[2] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
++#endif
+     if (window) {
+         ici.enabledExtensionCount = 2;
+         ici.ppEnabledExtensionNames = iext;
+     }
+     VKC(vkCreateInstance(&ici, nullptr, &g_inst));
++#ifdef __SWITCH__
++    volkLoadInstanceOnly(g_inst);
++#endif
+     uint32_t n = 0;
++#ifdef __SWITCH__
++    {
++        const VkResult er = vkEnumeratePhysicalDevices(g_inst, &n, nullptr);
++        vt::logf("vitart: vkEnumeratePhysicalDevices = %d, %u GPU(s)", (int)er, n);
++    }
++#else
+     vkEnumeratePhysicalDevices(g_inst, &n, nullptr);
++#endif
+     std::vector<VkPhysicalDevice> devs(n);
+     vkEnumeratePhysicalDevices(g_inst, &n, devs.data());
+     if (!n) {
+@@ -1361,6 +1695,10 @@
+     dci.enabledExtensionCount = (uint32_t)dexts.size();
+     dci.ppEnabledExtensionNames = dexts.empty() ? nullptr : dexts.data();
+     VKC(vkCreateDevice(g_phys, &dci, nullptr, &g_dev));
++    VK_STEP("vkCreateDevice ok");
++#ifdef __SWITCH__
++    volkLoadDevice(g_dev);
++#endif
+     vkGetDeviceQueue(g_dev, g_qfam, 0, &g_queue);
+     VkCommandPoolCreateInfo pci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+     pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+@@ -1373,11 +1711,13 @@
+     for (auto &cb : g_cmds) VKC(vkAllocateCommandBuffers(g_dev, &cai, &cb));
+     VKC(vkAllocateCommandBuffers(g_dev, &cai, &g_pcmd));
+     g_cur = g_cmd;
++    rec_start();
+     VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+     for (auto &f : g_fences) VKC(vkCreateFence(g_dev, &fci, nullptr, &f));
+     VkFenceCreateInfo pfci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+     pfci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+     VKC(vkCreateFence(g_dev, &pfci, nullptr, &g_pfence));
++    VK_STEP("cmd/fences ok");
+     {
+         VkPhysicalDeviceProperties pp;
+         vkGetPhysicalDeviceProperties(g_phys, &pp);
+@@ -1416,6 +1756,7 @@
+     rci.subpassCount = 1;
+     rci.pSubpasses = &sp;
+     VKC(vkCreateRenderPass(g_dev, &rci, nullptr, &g_rp));
++    VK_STEP("renderpass ok");
+ 
+     // Layout: set 0 = uniforms do vértice (0) e memória do vldst (1); set 1 = texturas do fragmento;
+     // set 2 = uniforms e memória do fragmento.
+@@ -1508,12 +1849,14 @@
+         VKC(vkCreateDescriptorPool(g_dev, &tpi, nullptr, &g_tex_pool));
+         select_slot(0);
+     }
++    VK_STEP("descriptor pools ok");
+     // A janela nasce na primeira apresentação: as mensagens só chegam à thread que a criou, e quem
+     // apresenta é a thread de vídeo, não a que inicializa.
+     const uint8_t flat[4] = {128, 128, 255, 255}, none[4] = {255, 204, 0, 0};
+     if (!frame_reserve(64) || !upload_texture(g_white, 1, 1, white) || !upload_texture(g_pbr_flat, 1, 1, flat) ||
+         !upload_texture(g_pbr_none, 1, 1, none))
+         return false;
++    VK_STEP("texturas iniciais ok");
+     return frame_flush(true);
+ }
+ 
+@@ -1629,6 +1972,7 @@
+ }
+ 
+ bool post_resources(uint32_t w, uint32_t h) {
++    rec_sync();
+     if (g_post.w == w && g_post.h == h) return true;
+     vkDeviceWaitIdle(g_dev); // as imagens antigas podem estar em uso no outro quadro em voo
+     for (Image *im : {&g_post.col, &g_post.dep, &g_post.a, &g_post.b, &g_post.c, &g_post.d, &g_post.focus}) destroy(*im);
+@@ -1652,6 +1996,7 @@
+ }
+ 
+ void compute_barrier() {
++    rec_sync();
+     VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+     mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+     mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+@@ -1660,6 +2005,7 @@
+ }
+ 
+ void post_save_depth(uint32_t addr, Image &dep) {
++    rec_sync();
+     if (addr != g_main_addr) return;
+     g_dbg_begin++;
+     const uint32_t n = g_scene3d;
+@@ -1708,6 +2054,7 @@
+ // Aplica o pós-processamento no alvo (gravado no quadro atual). Marca o quadro como feito mesmo se não
+ // houver o que fazer, para não tentar de novo.
+ void run_post(Target &t) {
++    rec_sync();
+     g_post_done = true;
+     const vt::pbr::Config &cfg = vt::pbr::config();
+     static const bool env_off = getenv("VITART_POST") && *getenv("VITART_POST") == '0';
+@@ -1957,7 +2304,10 @@
+         vbytes = (VkDeviceSize)na * d.vertex_count * 16;
+     VkDeviceSize need = vbytes + (VkDeviceSize)d.index_count * (d.index_data ? d.index_size : 4) + 8 + d.vert_uniforms_size +
+                         d.frag_uniforms_size + 64 * 1024;
+-    std::vector<uint64_t> keys(d.textures.size());
++    uint64_t keys_s[32] = {};
++    std::vector<uint64_t> keys_h;
++    uint64_t *keys = keys_s;
++    if (d.textures.size() > 32) keys_h.assign(d.textures.size(), 0), keys = keys_h.data();
+     for (size_t i = 0; i < d.textures.size(); i++) {
+         const Texture &t = d.textures[i];
+         if (t.target_addr || !t.rgba) continue;
+@@ -2081,14 +2431,17 @@
+     if (d.depth_write) tgt->dver++;
+ 
+     VkDeviceSize voff[16];
++    RecCopy cps[19];
++    uint32_t ncp = 0;
++    const uint32_t gm = d.debug_vs ? 0 : d.guest_mask;
+     for (uint32_t k = 0; k < na; k++)
+-        voff[k] = raw ? ring_put(d.raw_streams[k].data, d.raw_streams[k].size, 16)
++        voff[k] = raw ? ring_put_g(d.raw_streams[k].data, d.raw_streams[k].size, 16, (gm >> k) & 1, cps, ncp)
+                       : ring_put(d.attrs + (size_t)k * d.vertex_count * 4, (VkDeviceSize)d.vertex_count * 16, 16);
+-    const VkDeviceSize ioff = d.index_data ? ring_put(d.index_data, (VkDeviceSize)d.index_count * d.index_size, 4)
++    const VkDeviceSize ioff = d.index_data ? ring_put_g(d.index_data, (VkDeviceSize)d.index_count * d.index_size, 4, (gm >> 16) & 1, cps, ncp)
+                                            : ring_put(d.indices, (VkDeviceSize)d.index_count * 4, 4);
+-    const VkDeviceSize vuoff = ring_put(d.vert_uniforms, d.vert_uniforms_size, g_ssbo_align);
++    const VkDeviceSize vuoff = ring_put_g(d.vert_uniforms, d.vert_uniforms_size, g_ssbo_align, (gm >> 17) & 1, cps, ncp);
+     const VkDeviceSize dbgoff = d.debug_vs ? ring_put(nullptr, (VkDeviceSize)d.vertex_count * 16, 4) : 0;
+-    const VkDeviceSize fuoff = ring_put(d.frag_uniforms, d.frag_uniforms_size, g_ssbo_align);
++    const VkDeviceSize fuoff = ring_put_g(d.frag_uniforms, d.frag_uniforms_size, g_ssbo_align, (gm >> 18) & 1, cps, ncp);
+     const VkDeviceSize vurange = d.debug_vs ? (dbgoff + (VkDeviceSize)d.vertex_count * 16 - vuoff)
+                                             : (d.vert_uniforms_size ? d.vert_uniforms_size : 16);
+     const VkDeviceSize furange = d.frag_uniforms_size ? d.frag_uniforms_size : 16;
+@@ -2125,16 +2478,16 @@
+     const uint32_t dyn[4] = {(uint32_t)vuoff, (uint32_t)vuoff, (uint32_t)fuoff, (uint32_t)fuoff};
+ 
+     if (g_open != tgt) {
+-        end_pass();
+-        VkRenderPassBeginInfo rbi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+-        rbi.renderPass = g_rp;
+-        rbi.framebuffer = tgt->fb;
+-        rbi.renderArea = {{0, 0}, {tgt->color.w, tgt->color.h}};
+-        vkCmdBeginRenderPass(g_cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE);
++        end_pass_q();
++        RecOp &b = rec_slot();
++        b.kind = 1, b.cmd = g_cmd, b.fb = tgt->fb, b.w = tgt->color.w, b.h = tgt->color.h;
++        rec_commit();
+         g_open = tgt;
++        g_cs = {};
+     }
+-    vkCmdBindPipeline(g_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+-    vkCmdBindDescriptorSets(g_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 0, 3, sets, 4, dyn);
++    const bool cs_ok = g_cs.valid;
++    uint32_t flags = 0;
++    if (!cs_ok || g_cs.pipe != pipe) flags |= 1, g_cs.pipe = pipe;
+     // Viewport do GXM: tela = deslocamento + escala * ndc. No Vulkan, x = desl - escala, largura = 2 * escala
+     // (altura negativa inverte y, como a escala negativa do GXM).
+     VkViewport vp{d.vps[0] - d.vps[1], d.vps[2] - d.vps[3], 2 * d.vps[1], 2 * d.vps[3], d.vps[4], d.vps[4] + d.vps[5]};
+@@ -2145,10 +2498,11 @@
+     // escala do guest para o host, por eixo: no ultrawide o alvo de tela é mais largo que a escala
+     const float rs = (float)scale_now();
+     const float rsx = tgt->gw ? (float)tgt->color.w / (float)tgt->gw : rs;
+-    vp.x = (vp.x + halfpix) * rsx, vp.y = (vp.y + halfpix) * rs, vp.width *= rsx, vp.height *= rs;
++    const float rsy = tgt->gh ? (float)tgt->color.h / (float)tgt->gh : rs;
++    vp.x = (vp.x + halfpix) * rsx, vp.y = (vp.y + halfpix) * rsy, vp.width *= rsx, vp.height *= rsy;
+     vp.minDepth = vp.minDepth < 0 ? 0 : (vp.minDepth > 1 ? 1 : vp.minDepth);
+     vp.maxDepth = vp.maxDepth < 0 ? 0 : (vp.maxDepth > 1 ? 1 : vp.maxDepth);
+-    vkCmdSetViewport(g_cmd, 0, 1, &vp);
++    if (!cs_ok || std::memcmp(&g_cs.vp, &vp, sizeof vp)) flags |= 2, g_cs.vp = vp;
+     if (d.view_inv_ok && d.target_addr == g_main_addr && (d.depth_func != 7 || d.depth_write)) {
+         vt::pbr::screen_to_view(d.view_inv, vp.x, vp.y, vp.width, vp.height, vp.minDepth, vp.maxDepth, g_post_s2v);
+         g_post_s2v_ok = true;
+@@ -2158,29 +2512,38 @@
+         std::memcpy(g_post_sun_col, d.pbr_params + 20, 12);
+         g_post_sun_ok = true;
+     }
++    uint32_t poff = 0;
+     if (d.pbr) {
+         float prm[kPbrParamFloats];
+         std::memcpy(prm, d.pbr_params, sizeof prm);
+         // Pixel -> câmera: a inversa de g_Projection vezes a inversa do viewport usado na GPU.
+         vt::pbr::screen_to_view(d.pbr_params, vp.x, vp.y, vp.width, vp.height, vp.minDepth, vp.maxDepth, prm);
+-        const uint32_t poff = (uint32_t)ring_put(prm, sizeof prm, g_ssbo_align);
+-        VkDescriptorSet s34[2] = {pbr_set, g_pbrsets[g_fi]};
+-        vkCmdBindDescriptorSets(g_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 3, 2, s34, 1, &poff);
++        poff = (uint32_t)ring_put(prm, sizeof prm, g_ssbo_align);
++        flags |= 8;
+     }
+     VkRect2D sc{{0, 0}, {tgt->color.w, tgt->color.h}};
+-    vkCmdSetScissor(g_cmd, 0, 1, &sc);
+-    vkCmdSetStencilCompareMask(g_cmd, VK_STENCIL_FACE_FRONT_BIT, d.front.cmask);
+-    vkCmdSetStencilCompareMask(g_cmd, VK_STENCIL_FACE_BACK_BIT, d.back.cmask);
+-    vkCmdSetStencilWriteMask(g_cmd, VK_STENCIL_FACE_FRONT_BIT, d.front.wmask);
+-    vkCmdSetStencilWriteMask(g_cmd, VK_STENCIL_FACE_BACK_BIT, d.back.wmask);
+-    vkCmdSetStencilReference(g_cmd, VK_STENCIL_FACE_FRONT_BIT, d.front.ref);
+-    vkCmdSetStencilReference(g_cmd, VK_STENCIL_FACE_BACK_BIT, d.back.ref);
+-    VkBuffer bufs[16];
+-    for (uint32_t k = 0; k < na; k++) bufs[k] = g_ring.buf;
+-    if (na) vkCmdBindVertexBuffers(g_cmd, 0, na, bufs, voff);
+-    vkCmdBindIndexBuffer(g_cmd, g_ring.buf, ioff,
+-                         d.index_data && d.index_size == 2 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+-    vkCmdDrawIndexed(g_cmd, d.index_count, 1, 0, d.index_data ? d.vertex_offset : 0, 0);
++    if (!cs_ok || std::memcmp(&g_cs.sc, &sc, sizeof sc)) flags |= 4, g_cs.sc = sc;
++    const uint32_t sten[6] = {d.front.cmask, d.back.cmask, d.front.wmask, d.back.wmask, d.front.ref, d.back.ref};
++    for (int k = 0; k < 6; k++)
++        if (!cs_ok || sten[k] != g_cs.sten[k]) flags |= 1u << (16 + k);
++    std::memcpy(g_cs.sten, sten, sizeof sten);
++    g_cs.valid = true;
++    RecOp &o = rec_slot();
++    o.kind = 0, o.flags = flags, o.cmd = g_cmd, o.pipe = pipe;
++    o.ncp = ncp;
++    std::memcpy(o.cp, cps, ncp * sizeof(RecCopy));
++    std::memcpy(o.sets, sets, sizeof sets);
++    std::memcpy(o.dyn, dyn, sizeof dyn);
++    o.vp = vp, o.sc = sc;
++    std::memcpy(o.sten, sten, sizeof sten);
++    o.s34[0] = pbr_set, o.s34[1] = g_pbrsets[g_fi], o.poff = poff;
++    o.na = na;
++    for (uint32_t k = 0; k < na; k++) o.voff[k] = voff[k];
++    o.ioff = ioff;
++    o.itype = d.index_data && d.index_size == 2 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
++    o.index_count = d.index_count;
++    o.vertex_offset = d.index_data ? d.vertex_offset : 0;
++    rec_commit();
+     if (d.debug_vs) {
+         if (!frame_flush(true)) return false;
+         g_debug_vs.assign(reinterpret_cast<const float *>(g_ring_ptr + dbgoff),
+@@ -2199,6 +2562,7 @@
+ Stats take_stats() {
+     std::lock_guard<std::recursive_mutex> lock(g_lock);
+     Stats s = g_stats;
++    s.rec_ns = g_rec_ns.exchange(0), s.sync_ns = g_sync_ns.exchange(0);
+     g_stats = {};
+     return s;
+ }
+@@ -2243,18 +2607,18 @@
+ // Troca a resolução interna com o jogo rodando: cada alvo é recriado na escala nova e recebe a imagem
+ // atual reduzida/ampliada com filtro (a tela de pausa não pisca); a profundidade volta limpa, as cópias
+ // amostráveis e os conjuntos de textura que apontavam para as imagens velhas são refeitos sob demanda.
+-uint32_t render_scale() { return scale_now(); }
+-uint32_t auto_render_scale() { return scale_auto(); }
+-bool refazer_alvos(uint32_t s, float widen);
++uint32_t render_scale() { return (uint32_t)(scale_now() + 0.5f); }
++uint32_t auto_render_scale() { return (uint32_t)(scale_auto() + 0.5f); }
++bool refazer_alvos(float s, float widen);
+ bool set_render_scale(uint32_t s) {
+     std::lock_guard<std::recursive_mutex> lock(g_lock);
+     s = s < 1 ? 1 : s > 8 ? 8 : s;
+-    if (s == scale_now()) return true;
++    if ((float)s == scale_now()) return true;
+     if (!g_dev || g_targets.empty()) {
+         g_scale_override = s;
+         return true;
+     }
+-    if (!refazer_alvos(s, g_widen)) return false;
++    if (!refazer_alvos((float)s, g_widen)) return false;
+     g_scale_override = s;
+     return true;
+ }
+@@ -2272,7 +2636,8 @@
+     return true;
+ }
+ // Os alvos de novo no tamanho da escala s e da largura widen: o conteúdo atual reduzido/ampliado com filtro.
+-bool refazer_alvos(uint32_t s, float widen) {
++bool refazer_alvos(float s, float widen) {
++    rec_sync();
+     if (!frame_flush(true)) return false;
+     vkDeviceWaitIdle(g_dev);
+     if (!begin_cmd()) return false;
+@@ -2280,7 +2645,7 @@
+     std::vector<VkFramebuffer> old_fb;
+     for (auto &kv : g_targets) {
+         Target &t = kv.second;
+-        const uint32_t w = t.gw ? host_w(t.gw, t.gh, s, widen) : t.color.w, h = t.gh ? t.gh * s : t.color.h;
++        const uint32_t w = t.gw ? host_w(t.gw, t.gh, s, widen) : t.color.w, h = t.gh ? scaled(t.gh, s) : t.color.h;
+         Target n;
+         if (!make_image(n.color, w, h, kColor,
+                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+--- a/runtime/vitart/gxm_vk.h
++++ b/runtime/vitart/gxm_vk.h
+@@ -77,6 +77,9 @@
+     const uint32_t *vs = nullptr; uint32_t vs_size = 0; // bytes
+     const uint32_t *fs = nullptr; uint32_t fs_size = 0;
+     std::vector<Texture> textures;
++    // Dados na memória do guest (bits 0..15 streams crus, 16 índices, 17 uniforms de vértice, 18 de fragmento): o
++    // Vita só os reusa depois da cena, então a cópia para o anel pode ir na thread de gravação (sync_copies).
++    uint32_t guest_mask = 0;
+     bool debug_vs = false; // o vertex shader (de depuração) grava OUTPUT 0..3 após os uniforms
+     // PBR: fs é a variante PBR; pbr_maps = normal map e ORM (binding ignorado; amostragem como a da
+     // difusa). pbr_params[0..15] chega com a inversa de g_Projection (NDC do GXM -> câmera, coluna a
+@@ -110,6 +113,8 @@
+     uint64_t pipe_ns = 0;   // criação de módulos e pipelines
+     uint64_t ring_ns = 0;   // cópias para o anel de upload
+     uint64_t desc_ns = 0;   // alocação e escrita de descritores
++    uint64_t rec_ns = 0;    // gravação dos comandos na thread separada (em paralelo com o jogo)
++    uint64_t sync_ns = 0;   // jogo esperando a thread de gravação terminar a fila
+     uint32_t submits = 0, snapshots = 0, uploads = 0, pipes = 0, draws = 0;
+ };
+ 
+--- a/runtime/vitart/hle_gxm.cpp
++++ b/runtime/vitart/hle_gxm.cpp
+@@ -3,6 +3,9 @@
+ // ponteiros válidos) com o estado no host. Ainda não desenha: grava o que cada cena pede e
+ // conclui as notificações na hora, para o jogo seguir o laço. O renderizador Vulkan entra aqui.
+ #include "vitart.h"
++#ifdef __SWITCH__
++#include "nx_platform.h"
++#endif
+ #include "gxm_tex.h"
+ #include "gxm_texto.h"
+ #include "gxm_vk.h"
+@@ -20,6 +23,7 @@
+ #include <cmath>
+ #include <cstring>
+ 
++#include <atomic>
+ #include <chrono>
+ #include <cstdlib>
+ #include <filesystem>
+@@ -28,9 +32,13 @@
+ #include <map>
+ #include <set>
+ #include <memory>
++#include <mutex>
+ #include <thread>
+ #include <tuple>
+ #include <unordered_map>
++#if defined(__aarch64__)
++#include <arm_neon.h>
++#endif
+ 
+ namespace vt {
+ std::string mods_dir_for(const std::string &psarc_name); // hle_io.cpp: pasta dos mods
+@@ -44,6 +52,16 @@
+     uint32_t program = 0; // SceGxmProgram* no guest
+     std::vector<uint8_t> attributes, streams;
+     uint32_t attr_count = 0, stream_count = 0;
++    // Layout dos atributos para o desenho (vk_draw_impl monta na primeira vez): locations (registro de cada parâmetro
++    // de entrada) e, por location, os atributos candidatos (o primeiro com stream ligado vale).
++    struct LayAttr {
++        uint16_t st, off, stride, bytes;
++        uint8_t fmt, nc;
++        bool fmt_ok;
++    };
++    bool lay_done = false;
++    std::vector<uint32_t> lay_locs;
++    std::vector<std::vector<LayAttr>> lay_cands;
+ };
+ struct FragmentProgram {
+     uint32_t program = 0, vertex_program = 0, output_format = 0, msaa = 0;
+@@ -86,10 +104,17 @@
+     return a;
+ }
+ 
+-static std::shared_ptr<Context> context_of(uint32_t h) {
++// Contextos nunca saem de g_contexts: a última busca de cada thread fica guardada (sem lock nem contagem
++// atômica do shared_ptr a cada sceGxmSet*/Draw).
++static Context *context_of(uint32_t h) {
++    static thread_local uint32_t last_h = 0;
++    static thread_local Context *last_c = nullptr;
++    if (h && h == last_h) return last_c;
+     const std::lock_guard<std::mutex> lock(g_gxm_mutex);
+     auto it = g_contexts.find(h);
+-    return it == g_contexts.end() ? nullptr : it->second;
++    if (it == g_contexts.end()) return nullptr;
++    last_h = h, last_c = it->second.get();
++    return last_c;
+ }
+ 
+ // ------------------------------------------------------- estatística de quadros
+@@ -542,7 +567,7 @@
+     auto job = std::make_shared<TexpackJob>();
+     g_tp_jobs[key] = job;
+     const std::string path = tp_path(key);
+-    std::thread([job, path] {
++    vt::spawn_detached([job, path] {
+         {
+             std::unique_lock<std::mutex> l(g_tp_sem_mutex);
+             g_tp_sem_cv.wait(l, [] { return g_tp_running < 3; });
+@@ -562,7 +587,7 @@
+         }
+         g_tp_sem_cv.notify_one();
+         job->done = true;
+-    }).detach();
++    });
+ }
+ // PNG pronto para a chave: valida pelo conteúdo contra a textura original e devolve o HD (ou nulo).
+ static std::shared_ptr<std::vector<uint8_t>> texpack_take(uint64_t key, const gxmtex::Info &info,
+@@ -668,9 +693,28 @@
+     if (logged++ < 5) logf("vitart: textura trocada pelo pack (%ux%u -> %ux%u)", info.width, info.height, w, h);
+     return job->px;
+ }
+-static std::map<std::array<uint32_t, 4>, TexEntry> g_texcache;
++struct TexKeyHash {
++    size_t operator()(const std::array<uint32_t, 4> &w) const {
++        uint64_t h = 0x9E3779B97F4A7C15ull;
++        for (uint32_t x : w) h = (h ^ x) * 0xFF51AFD7ED558CCDull, h ^= h >> 32;
++        return (size_t)h;
++    }
++};
++static std::unordered_map<std::array<uint32_t, 4>, TexEntry, TexKeyHash> g_texcache;
+ static uint64_t content_hash(const uint8_t *p, size_t n, uint64_t h) {
+     size_t i = 0;
++    if (n >= 64) { // 4 trilhas independentes (a cadeia de multiplicações não espera uma pela outra), depois juntas
++        uint64_t l[4] = {h, h ^ 0x632BE59BD9B4E019ull, h ^ 0x85EBCA77C2B2AE63ull, h ^ 0xC2B2AE3D27D4EB4Full};
++        for (; i + 32 <= n; i += 32)
++            for (int k = 0; k < 4; k++) {
++                uint64_t v;
++                std::memcpy(&v, p + i + 8 * k, 8);
++                l[k] = (l[k] ^ v) * 0x9E3779B97F4A7C15ull;
++                l[k] ^= l[k] >> 29;
++            }
++        h = l[0];
++        for (int k = 1; k < 4; k++) h = ((h ^ l[k]) * 0x9E3779B97F4A7C15ull) ^ (h >> 31);
++    }
+     for (; i + 8 <= n; i += 8) {
+         uint64_t v;
+         std::memcpy(&v, p + i, 8);
+@@ -702,6 +746,7 @@
+ }
+ // Tempo de CPU (ns) por etapa, zerado a cada relatório: onde o quadro gasta.
+ static std::atomic<uint64_t> g_t_draw{0}, g_t_gvk{0}, g_t_present{0}, g_t_idx{0}, g_t_attr{0}, g_t_tex{0};
++static std::atomic<uint32_t> g_n_cpu_attr{0}, g_n_draws_hle{0}; // desenhos com atributos convertidos na CPU
+ static uint64_t now_ns() {
+     return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+ }
+@@ -737,7 +782,59 @@
+     std::snprintf(name, sizeof name, "%016llx", (unsigned long long)h);
+     return name;
+ }
++// Pacote <spv dir>/shaders.pak (tools/pack_shaders.py): abrir milhares de arquivos soltos no SD do Switch leva
++// ~20 ms cada; com o pacote o índice fica na memória e cada shader é um fseek+fread no arquivo já aberto.
++// Formato: "SPVPAK1\0", u32 n, n x {char nome[28], u32 tamanho, u64 offset}, dados.
++struct SpvPak {
++    std::FILE *f = nullptr;
++    std::unordered_map<std::string, std::pair<uint64_t, uint32_t>> idx;
++    std::mutex m;
++};
++static SpvPak &spv_pak() {
++    static SpvPak *p = [] {
++        auto *k = new SpvPak;
++        k->f = std::fopen((g_spv_dir + "/shaders.pak").c_str(), "rb");
++        if (!k->f) return k;
++        std::setvbuf(k->f, nullptr, _IOFBF, 1 << 16);
++        char magic[8];
++        uint32_t n = 0;
++        if (std::fread(magic, 1, 8, k->f) != 8 || std::memcmp(magic, "SPVPAK1", 8) || std::fread(&n, 4, 1, k->f) != 1) {
++            std::fclose(k->f), k->f = nullptr;
++            return k;
++        }
++        struct E {
++            char name[28];
++            uint32_t size;
++            uint64_t off;
++        };
++        std::vector<E> es(n);
++        if (std::fread(es.data(), sizeof(E), n, k->f) != n) {
++            std::fclose(k->f), k->f = nullptr;
++            return k;
++        }
++        k->idx.reserve(n);
++        for (const E &e : es) k->idx[std::string(e.name, strnlen(e.name, sizeof e.name))] = {e.off, e.size};
++        logf("vitart: pacote de shaders: %u programas", n);
++        return k;
++    }();
++    return *p;
++}
+ static std::shared_ptr<std::vector<uint32_t>> spv_read(const std::string &path) {
++    {
++        SpvPak &pk = spv_pak();
++        if (pk.f) {
++            const size_t sl = path.find_last_of('/');
++            auto it = pk.idx.find(sl == std::string::npos ? path : path.substr(sl + 1));
++            if (it == pk.idx.end()) return nullptr; // com pacote, sem arquivos soltos (cada falta custaria uma busca na pasta)
++            const uint32_t sz = it->second.second;
++            if (sz < 20) return nullptr;
++            auto code = std::make_shared<std::vector<uint32_t>>(sz / 4);
++            const std::lock_guard<std::mutex> lock(pk.m);
++            if (std::fseek(pk.f, (long)it->second.first, SEEK_SET) || std::fread(code->data(), 4, code->size(), pk.f) != code->size())
++                return nullptr;
++            return code;
++        }
++    }
+     std::ifstream f(path, std::ios::binary);
+     if (!f) return nullptr;
+     std::vector<char> raw((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+@@ -871,7 +968,14 @@
+ // desalinhado são copiados para um layout alinhado a 4 bytes (só os atributos usados, na mesma ordem).
+ static void realign_streams(std::vector<gvk::VertexStream> &streams, std::vector<gvk::VertexAttr> &attrs, uint32_t nv,
+                             std::vector<std::vector<uint8_t>> &store) {
+-    static const bool off = getenv("VITART_VK_NO_REALIGN") != nullptr; // comparação: o layout cru como antes
++    // comparação: o layout cru como antes. No Switch (Tegra X1, hardware NVIDIA, que lê vértice desalinhado como as
++    // NVIDIA do PC) o padrão é não realinhar: copiar todos os vértices de cada desenho era o maior custo de CPU por
++    // desenho; VITART_VK_REALIGN=1 volta a realinhar.
++#ifdef __SWITCH__
++    static const bool off = getenv("VITART_VK_REALIGN") == nullptr;
++#else
++    static const bool off = getenv("VITART_VK_NO_REALIGN") != nullptr;
++#endif
+     if (off) return;
+     for (uint32_t b = 0; b < streams.size(); b++) {
+         gvk::VertexStream &st = streams[b];
+@@ -1152,6 +1256,63 @@
+     g_uw_proj++;
+ }
+ 
++// Menor e maior índice (a faixa de vértices do desenho); NEON no Switch, 16 índices por volta.
++static void index_range(const uint8_t *p, uint32_t n, uint32_t isz, uint32_t &lo, uint32_t &hi) {
++    uint32_t i = 0;
++    if (isz == 4) {
++        const uint32_t *ix = reinterpret_cast<const uint32_t *>(p);
++        uint32_t l = UINT32_MAX, h = 0;
++#if defined(__aarch64__)
++        if (n >= 16) {
++            uint32x4_t mn0 = vdupq_n_u32(UINT32_MAX), mn1 = mn0, mx0 = vdupq_n_u32(0), mx1 = mx0;
++            for (; i + 8 <= n; i += 8) {
++                const uint32x4_t a = vld1q_u32(ix + i), b = vld1q_u32(ix + i + 4);
++                mn0 = vminq_u32(mn0, a), mx0 = vmaxq_u32(mx0, a), mn1 = vminq_u32(mn1, b), mx1 = vmaxq_u32(mx1, b);
++            }
++            l = vminvq_u32(vminq_u32(mn0, mn1)), h = vmaxvq_u32(vmaxq_u32(mx0, mx1));
++        }
++#endif
++        for (; i < n; i++) l = std::min(l, ix[i]), h = std::max(h, ix[i]);
++        lo = l, hi = h;
++    } else {
++        const uint16_t *ix = reinterpret_cast<const uint16_t *>(p);
++        uint16_t l = 0xFFFF, h = 0;
++#if defined(__aarch64__)
++        if (n >= 32) {
++            uint16x8_t mn0 = vdupq_n_u16(0xFFFF), mn1 = mn0, mx0 = vdupq_n_u16(0), mx1 = mx0;
++            for (; i + 16 <= n; i += 16) {
++                const uint16x8_t a = vld1q_u16(ix + i), b = vld1q_u16(ix + i + 8);
++                mn0 = vminq_u16(mn0, a), mx0 = vmaxq_u16(mx0, a), mn1 = vminq_u16(mn1, b), mx1 = vmaxq_u16(mx1, b);
++            }
++            l = vminvq_u16(vminq_u16(mn0, mn1)), h = vmaxvq_u16(vmaxq_u16(mx0, mx1));
++        }
++#endif
++        for (; i < n; i++) l = std::min(l, ix[i]), h = std::max(h, ix[i]);
++        lo = l, hi = h;
++    }
++}
++static void build_layout(VertexProgram &vp) {
++    const uint32_t nparams = rd32(vp.program + 0x24);
++    for (uint32_t i = 0; i < nparams; i++) {
++        const uint32_t p = gxp_param(vp.program, i);
++        if ((*ptr<uint8_t>(p + 4) & 15) == 0) vp.lay_locs.push_back(rd32(p + 12));
++    }
++    vp.lay_cands.resize(vp.lay_locs.size());
++    for (size_t k = 0; k < vp.lay_locs.size(); k++)
++        for (uint32_t a = 0; a < vp.attr_count; a++) {
++            const uint8_t *d = &vp.attributes[8 * a];
++            const uint32_t st = d[0] | (d[1] << 8), off = d[2] | (d[3] << 8), fmt = d[4], comps = d[5], reg = d[6] | (d[7] << 8);
++            if (reg != vp.lay_locs[k] || st >= 16) continue;
++            VertexProgram::LayAttr la;
++            la.st = (uint16_t)st, la.off = (uint16_t)off, la.fmt = (uint8_t)fmt, la.nc = (uint8_t)(comps < 4 ? comps : 4);
++            la.stride = *reinterpret_cast<const uint16_t *>(&vp.streams[4 * st]);
++            la.bytes = (uint16_t)(attr_size(fmt) * la.nc);
++            la.fmt_ok = gvk::vertex_format_ok(fmt, la.nc);
++            vp.lay_cands[k].push_back(la);
++        }
++    vp.lay_done = true;
++}
++
+ static void vk_draw_impl(Context &c, uint32_t prim, uint32_t itype, uint32_t idata, uint32_t icount);
+ static void vk_draw(Context &c, uint32_t prim, uint32_t itype, uint32_t idata, uint32_t icount) {
+     const uint64_t t0 = now_ns();
+@@ -1187,15 +1348,7 @@
+     const uint32_t nidx = kind == 0 ? icount / 3 * 3 : icount;
+     if (nidx < 3) return;
+     uint32_t maxi = 0, mini = UINT32_MAX;
+-    if (isz == 4) {
+-        const uint32_t *ix = ptr<uint32_t>(idata);
+-        for (uint32_t i = 0; i < nidx; i++) maxi = std::max(maxi, ix[i]), mini = std::min(mini, ix[i]);
+-    } else {
+-        const uint16_t *ix = ptr<uint16_t>(idata);
+-        uint32_t lo = 0xFFFF, hi = 0;
+-        for (uint32_t i = 0; i < nidx; i++) hi = std::max<uint32_t>(hi, ix[i]), lo = std::min<uint32_t>(lo, ix[i]);
+-        maxi = hi, mini = lo;
+-    }
++    index_range(ptr<uint8_t>(idata), nidx, isz, mini, maxi);
+     maxi -= mini;
+     if (maxi > (1u << 20)) return;
+     const uint32_t nv = maxi + 1;
+@@ -1203,16 +1356,17 @@
+     const uint64_t t_attr0 = now_ns();
+     g_t_idx += t_attr0 - t_idx0;
+     // Atributos: location k = k-ésimo parâmetro de entrada (categoria 0), ligado pelo índice de recurso.
+-    std::vector<uint32_t> locs;
+-    const uint32_t nparams = rd32(vp->program + 0x24);
+-    for (uint32_t i = 0; i < nparams; i++) {
+-        const uint32_t p = gxp_param(vp->program, i);
+-        if ((*ptr<uint8_t>(p + 4) & 15) == 0) locs.push_back(rd32(p + 12));
+-    }
++    if (!vp->lay_done) build_layout(*vp);
++    const std::vector<uint32_t> &locs = vp->lay_locs;
+     // Caminho cru: os streams vão como estão e a GPU converte (formatos nativos de vértice). Só se cada
+     // location tem atributo com formato suportado; senão, conversão para vec4 na CPU como antes.
+-    std::vector<gvk::VertexStream> raw_streams;
+-    std::vector<gvk::VertexAttr> raw_attrs;
++    // vetores reaproveitados de um desenho para o outro (tudo aqui roda sob g_vk_mutex): sem malloc por desenho
++    static std::vector<gvk::VertexStream> s_streams;
++    static std::vector<gvk::VertexAttr> s_attrs;
++    std::vector<gvk::VertexStream> &raw_streams = s_streams;
++    std::vector<gvk::VertexAttr> &raw_attrs = s_attrs;
++    raw_streams.clear(), raw_attrs.clear();
++    const void *guest_data[16] = {}; // ponteiro de cada stream na memória do guest (guest_mask)
+     std::vector<std::vector<uint8_t>> realigned; // streams realinhados (realign_streams): valem até o gvk::draw
+     {
+         static const bool no_raw = getenv("VITART_VK_CPU_ATTRS") != nullptr;
+@@ -1222,22 +1376,21 @@
+         std::fill(std::begin(binding_of), std::end(binding_of), -1);
+         for (size_t k = 0; ok && k < locs.size(); k++) {
+             bool found = false;
+-            for (uint32_t a = 0; a < vp->attr_count; a++) {
+-                const uint8_t *d = &vp->attributes[8 * a];
+-                const uint32_t st = d[0] | (d[1] << 8), off = d[2] | (d[3] << 8), fmt = d[4], comps = d[5], reg = d[6] | (d[7] << 8);
+-                if (reg != locs[k] || st >= 16 || !c.streams[st]) continue;
+-                const uint32_t nc = comps < 4 ? comps : 4;
+-                if (!gvk::vertex_format_ok(fmt, nc)) break;
++            for (const VertexProgram::LayAttr &la : vp->lay_cands[k]) {
++                const uint32_t st = la.st;
++                if (!c.streams[st]) continue;
++                if (!la.fmt_ok) break;
+                 if (binding_of[st] < 0) {
+                     binding_of[st] = (int)raw_streams.size();
+                     gvk::VertexStream vs_;
+-                    vs_.stride = *reinterpret_cast<const uint16_t *>(&vp->streams[4 * st]);
++                    vs_.stride = la.stride;
+                     vs_.data = ptr<uint8_t>(c.streams[st] + mini * vs_.stride);
++                    guest_data[raw_streams.size()] = vs_.data;
+                     raw_streams.push_back(vs_);
+                 }
+-                end_of[st] = std::max(end_of[st], off + attr_size(fmt) * nc);
++                end_of[st] = std::max<uint32_t>(end_of[st], la.off + la.bytes);
+                 gvk::VertexAttr va;
+-                va.location = (uint32_t)k, va.stream = (uint32_t)binding_of[st], va.offset = off, va.fmt = fmt, va.comps = nc;
++                va.location = (uint32_t)k, va.stream = (uint32_t)binding_of[st], va.offset = la.off, va.fmt = la.fmt, va.comps = la.nc;
+                 raw_attrs.push_back(va);
+                 found = true;
+                 break;
+@@ -1280,7 +1433,12 @@
+ 
+     const uint64_t t_tex0 = now_ns();
+     g_t_attr += t_tex0 - t_attr0;
++    g_n_draws_hle++;
++    if (raw_attrs.empty()) g_n_cpu_attr++;
+     gvk::Draw d;
++    static std::vector<gvk::Texture> s_tex; // capacidade reaproveitada (devolvida depois do gvk::draw)
++    d.textures.swap(s_tex);
++    d.textures.clear();
+     d.prim = kind;
+     d.cull = c.cull;
+     d.has_blend = fp->blend.size() == 4;
+@@ -1321,8 +1479,11 @@
+     if (c.funiform && fsize) d.frag_uniforms = ptr<uint8_t>(c.funiform), d.frag_uniforms_size = fsize;
+     d.vs = vs->data(), d.vs_size = (uint32_t)vs->size() * 4;
+     d.fs = fs->data(), d.fs_size = (uint32_t)fs->size() * 4;
+-    std::vector<std::shared_ptr<std::vector<uint8_t>>> keep;
++    static std::vector<std::shared_ptr<std::vector<uint8_t>>> s_keep;
++    std::vector<std::shared_ptr<std::vector<uint8_t>>> &keep = s_keep;
++    keep.clear();
+     const PbrProgInfo &pinfo_f = pbr_prog(fp->program);
++    const PbrProgInfo &pinfo_v = pbr_prog(vp->program);
+     bool font_draw = false;    // amostra o atlas da fonte: é texto da interface
+     int diffuse_idx = -1;      // posição da textura difusa em d.textures (só textura comum, não alvo)
+     uint64_t diffuse_key = 0;  // material PBR dela
+@@ -1341,9 +1502,10 @@
+         t.mip_filter = (uint8_t)((w[0] >> 9) & 1), t.mip_count = (uint8_t)((w[0] >> 17) & 15);
+         t.lod_bias = (uint8_t)((w[0] >> 21) & 63);
+         t.width = info.width, t.height = info.height;
+-        if (gvk::is_target(info.data)) {
++        const int tkind = gvk::target_kind(info.data);
++        if (tkind == 1) {
+             t.target_addr = info.data;
+-        } else if (gvk::is_depth(info.data)) {
++        } else if (tkind == 2) {
+             t.target_addr = info.data, t.depth = true;
+         } else {
+             TexEntry &e = g_texcache[w];
+@@ -1430,7 +1592,7 @@
+     }
+     if (c.vuniform) { // a última projeção de perspectiva, pro jogo projetar coisas na tela (last_projection)
+         static const bool tf_diag = getenv("VITART_ENEMYLOG") != nullptr; // só no diagnóstico: custa por desenho
+-        if (const int ti = pbr_prog(vp->program).vi.transforms; tf_diag && ti >= 0 && (uint32_t)ti + 16 <= vsize / 4) {
++        if (const int ti = pinfo_v.vi.transforms; tf_diag && ti >= 0 && (uint32_t)ti + 16 <= vsize / 4) {
+             // g_Transforms[0] de cada desenho, contados por quadro (o mais repetido tende a ser a vista)
+             std::lock_guard<std::mutex> lk(g_proj_lock);
+             const uint32_t fr = g_present_frame.load();
+@@ -1442,21 +1604,21 @@
+                 if (e.first == m) e.second++, seen = true;
+             if (!seen && g_tf_cur.size() < 256) g_tf_cur.push_back({m, 1});
+         }
+-        const int vpi = pbr_prog(vp->program).vi.view_proj;
++        const int vpi = pinfo_v.vi.view_proj;
+         if (vpi >= 0 && (uint32_t)vpi + 16 <= vsize / 4) { // mundo -> clip pronto (g_ViewProjection)
+             std::lock_guard<std::mutex> lk(g_proj_lock);
+             std::memcpy(g_last_vp, ptr<float>(c.vuniform) + vpi, sizeof g_last_vp);
+             g_vp_frame = g_present_frame.load();
+         }
+         float cm[16];
+-        if (pbr::projection(pbr_prog(vp->program).vi, ptr<float>(c.vuniform), vsize / 4, cm)) {
++        if (pbr::projection(pinfo_v.vi, ptr<float>(c.vuniform), vsize / 4, cm)) {
+             std::lock_guard<std::mutex> lk(g_proj_lock);
+             std::memcpy(g_last_proj, cm, sizeof cm);
+             g_proj_ok = true;
+         }
+     }
+     if (c.vuniform && pbr::config().post)
+-        d.view_inv_ok = pbr::inv_projection(pbr_prog(vp->program).vi, ptr<float>(c.vuniform), vsize / 4, d.view_inv);
++        d.view_inv_ok = pbr::inv_projection(pinfo_v.vi, ptr<float>(c.vuniform), vsize / 4, d.view_inv);
+     // PBR: troca o fragmento pela variante PBR quando a textura difusa tem material, o vértice tem
+     // projeção em perspectiva e a superfície é opaca.
+     if (diffuse_idx >= 0 && c.vuniform && pbr::enabled() && !g_pbr_ab_off) {
+@@ -1468,7 +1630,7 @@
+         if (!mat) g_pbr_why[0]++;
+         else if (!pbr_blend_ok(d)) g_pbr_why[1]++, g_pbr_blends[d.blend]++;
+         else if (!(pfs = spv_pbr_of(fp->program))) g_pbr_why[2]++;
+-        else if (!pbr::params(pbr_prog(vp->program).vi, ptr<float>(c.vuniform), vsize / 4, frame, d.pbr_params)) g_pbr_why[3]++;
++        else if (!pbr::params(pinfo_v.vi, ptr<float>(c.vuniform), vsize / 4, frame, d.pbr_params)) g_pbr_why[3]++;
+         else use = true;
+         if (use) {
+             d.pbr = true;
+@@ -1492,10 +1654,22 @@
+     if (font_draw) squeeze_text(d, vp->program, text_copy);
+     std::vector<uint8_t> uw_uniforms; // ultrawide: uniforms com a projeção mais larga (vale até o gvk::draw)
+     ultrawide(d, vp->program, c.vuniform, c.vuniform ? vsize : 0, uw_uniforms, text_copy);
++    {
++        uint32_t gm = 0;
++        for (size_t k = 0; k < d.raw_streams.size() && k < 16; k++)
++            if (guest_data[k] && d.raw_streams[k].data == guest_data[k]) gm |= 1u << k;
++        if (d.index_data == ptr<void>(idata)) gm |= 1u << 16;
++        if (c.vuniform && d.vert_uniforms == ptr<uint8_t>(c.vuniform)) gm |= 1u << 17;
++        if (c.funiform && d.frag_uniforms == ptr<uint8_t>(c.funiform)) gm |= 1u << 18;
++        d.guest_mask = gm;
++    }
+     const uint64_t tg = now_ns();
+     g_t_tex += tg - t_tex0;
+     const bool drew = gvk::draw(d);
+     g_t_gvk += now_ns() - tg;
++    s_streams = std::move(d.raw_streams), s_attrs = std::move(d.raw_attrs);
++    s_tex.swap(d.textures);
++    keep.clear();
+     if (!drew)
+         logf("vitart: desenho Vulkan falhou: %s", gvk::last_error());
+     else
+@@ -1504,7 +1678,41 @@
+ 
+ // Travadas: quadro com intervalo > 25 ms (depois do carregamento) vai para o log com o que aconteceu
+ // nele -- texturas e pipelines novos, tempos de criação --, e a cada 10 s sai um resumo do ritmo.
++#ifdef __SWITCH__
++// Vigia: a cada 2 s, depois do quadro 250 (onde começa a carga dos shaders), diz no log quantos quadros saíram, a E/S
++// e os pipelines novos -- para saber onde o console para quando trava.
++extern std::atomic<uint64_t> g_io_calls, g_io_bytes, g_io_ns; // hle_io.cpp
++static void watchdog_start() {
++    static bool started = false;
++    if (started) return;
++    started = true;
++    nxp::prof_start();
++    vt::spawn_detached([] {
++        uint32_t last = g_present_frame.load();
++        uint64_t c0 = 0, b0 = 0, n0 = 0;
++        uint32_t p0 = 0;
++        int idle = 0;
++        for (;;) {
++            std::this_thread::sleep_for(std::chrono::seconds(2));
++            const uint32_t now = g_present_frame.load();
++            const uint64_t c = g_io_calls.load(), b = g_io_bytes.load(), n = g_io_ns.load();
++            const uint32_t pipes = gvk::peek_stats().pipes;
++            idle = now == last ? idle + 2 : 0;
++            if (now > 250)
++                logf("vigia: quadro %u (%s), E/S %llu leituras %llu KiB %.0f ms, pipelines novos %u", now,
++                     idle ? (std::to_string(idle) + " s sem quadro").c_str() : "andando", (unsigned long long)(c - c0),
++                     (unsigned long long)((b - b0) >> 10), (n - n0) / 1e6, pipes - p0);
++            if (idle >= 2 && idle % 2 == 0) nxp::dump_fs_ops(idle == 4 || idle == 30);
++            if (idle == 6 || idle == 30) nxp::dump_threads();
++            last = now, c0 = c, b0 = b, n0 = n, p0 = pipes;
++        }
++    }, "vigia");
++}
++#endif
+ static void hitch_tick() {
++#ifdef __SWITCH__
++    watchdog_start();
++#endif
+     using clk = std::chrono::steady_clock;
+     static clk::time_point last = clk::now(), window = clk::now();
+     static gvk::Stats prev{};
+@@ -1517,7 +1725,12 @@
+     auto d64 = [](uint64_t a, uint64_t b) { return a >= b ? a - b : a; };
+     auto d32 = [](uint32_t a, uint32_t b) { return a >= b ? a - b : a; };
+     frames++, wframes++;
+-    if (frames > 300 && ms > 25.0) {
++#ifdef __SWITCH__
++    const double hitch_ms = 40.0; // o jogo roda a 30 fps no Switch: 33 ms é o ritmo normal, não travada
++#else
++    const double hitch_ms = 25.0;
++#endif
++    if (frames > 300 && ms > hitch_ms) {
+         slow++;
+         worst = ms > worst ? ms : worst;
+         if (logged++ < 400)
+@@ -1530,6 +1743,9 @@
+     prev = st;
+     if (now - window > std::chrono::seconds(10)) {
+         if (frames > 300) logf("vitart: ritmo: %u quadros em 10 s, %u acima de 25 ms (pior %.1f ms)", wframes, slow, worst);
++#ifdef __SWITCH__
++        nxp::log_clocks();
++#endif
+         static uint64_t pbr_prev = 0, draws_prev = 0;
+         if (g_pbr_draws != pbr_prev)
+             logf("vitart: PBR em %llu de %llu desenhos nos últimos 10 s", (unsigned long long)(g_pbr_draws - pbr_prev),
+@@ -1555,10 +1771,19 @@
+     }
+ }
+ 
++#ifdef __SWITCH__
++static int g_ptrace = 0; // primeiros presents no Switch: rastreia cada passo
++#define PTRACE(s) do { if (g_ptrace < 3) logf("present %d: %s", g_ptrace, s); } while (0)
++#else
++#define PTRACE(s) ((void)0)
++#endif
+ void gxm_present(uint32_t fb) {
+     if (g_vk != 1) return;
++    PTRACE("início");
+     hitch_tick();
+-    game_options_tick(); // opções do PC no menu de pausa do jogo (game_options.cpp)
++    PTRACE("hitch ok");
++    game_options_tick();
++    PTRACE("game_options ok"); // opções do PC no menu de pausa do jogo (game_options.cpp)
+     if (g_texcache_flush.exchange(false)) {
+         const std::lock_guard<std::mutex> lock(g_vk_mutex);
+         g_texcache.clear(); // tudo é decodificado de novo no próximo uso, com ou sem o pack
+@@ -1569,6 +1794,7 @@
+         const std::lock_guard<std::mutex> lock(g_vk_mutex);
+         pbr::tick(g_present_frame.load()); // pbr.ini ao vivo e mapas parados fora da memória
+     }
++    PTRACE("pbr ok");
+     if (g_texpack_bytes > (1536ull << 20)) {
+         const std::lock_guard<std::mutex> lock(g_vk_mutex);
+         const uint32_t now = g_present_frame.load();
+@@ -1578,7 +1804,8 @@
+                 e.px.reset();
+             }
+     }
+-    enemy_hp_draw(fb); // barras de vida dos inimigos (enemy_hp.cpp), antes da captura e do present
++    enemy_hp_draw(fb);
++    PTRACE("enemy_hp ok"); // barras de vida dos inimigos (enemy_hp.cpp), antes da captura e do present
+     static uint32_t frame = 0;
+     static const uint32_t dump_at = getenv("VITART_VK_DUMP") ? (uint32_t)std::atoi(getenv("VITART_VK_DUMP")) : 0;
+     static const bool pbr_ab = getenv("VITART_PBR_AB") != nullptr;
+@@ -1589,6 +1816,7 @@
+     const uint8_t *vf = nullptr;
+     uint32_t vw = 0, vh = 0;
+     const bool vid = video_hd_frame(video_bink_frame(), vf, vw, vh);
++    PTRACE("video ok");
+     const bool ab_dump = ab_left > 0 && --ab_left == 0;
+     if (ab_dump) g_pbr_ab_off = false, gvk::set_post_bypass(false);
+     if (++frame == dump_at || ab_dump || (dump_at && frame % (dump_at < 300 ? dump_at : 300) == 0)) {
+@@ -1616,7 +1844,12 @@
+     }
+     const uint64_t tp = now_ns();
+     if (vid) gvk::set_video_frame(vf, vw, vh);
++    PTRACE("gvk::present");
+     gvk::present(fb);
++    PTRACE("gvk::present ok");
++#ifdef __SWITCH__
++    g_ptrace++;
++#endif
+     g_t_present += now_ns() - tp;
+     if (census() && frame % 600 == 0) {
+         for (auto &[k, n] : g_census) logf("vitart: censo: %s: %llu", k.c_str(), (unsigned long long)n);
+@@ -1626,11 +1859,14 @@
+              g_t_draw.exchange(0) / 120e6, g_t_gvk.exchange(0) / 120e6, g_t_present.exchange(0) / 120e6);
+         logf("vitart:   hle por quadro: índices %.1f ms, atributos %.1f ms, estado+texturas %.1f ms",
+              g_t_idx.exchange(0) / 120e6, g_t_attr.exchange(0) / 120e6, g_t_tex.exchange(0) / 120e6);
++        logf("vitart:   atributos na CPU em %u de %u desenhos", g_n_cpu_attr.exchange(0), g_n_draws_hle.exchange(0));
+         const gvk::Stats s = gvk::take_stats();
+         logf("vitart:   gvk por quadro: espera %.1f ms, GPU %.1f ms, imagens %.1f ms, pipelines %.1f ms, anel %.1f ms, "
+              "descritores %.1f ms; %.1f envios, %.1f desenhos, %.1f cópias de alvo, %.1f texturas, %u pipelines novos",
+              s.wait_ns / 120e6, s.gpu_ns / 120e6, s.alloc_ns / 120e6, s.pipe_ns / 120e6, s.ring_ns / 120e6,
+              s.desc_ns / 120e6, s.submits / 120.0, s.draws / 120.0, s.snapshots / 120.0, s.uploads / 120.0, s.pipes);
++        logf("vitart:   thread de gravação: %.1f ms por quadro gravando, jogo esperando por ela %.1f ms", s.rec_ns / 120e6,
++             s.sync_ns / 120e6);
+     }
+     if (gvk::window_closed()) {
+         logf("vitart: janela fechada (%llu desenhos Vulkan, %llu sem shader, %llu de texto em 4:3)", (unsigned long long)g_vk_draws,
+@@ -2072,6 +2308,7 @@
+     if (!c) return ret(ctx, GXM_ERROR_INVALID_POINTER);
+     c->in_scene = false;
+     g_scenes++;
++    if (vk_on()) gvk::sync_copies(); // os buffers da cena já foram para o anel antes de o jogo poder reusá-los
+     // Sem GPU ainda: a cena "termina" já; as notificações liberam o jogo para reusar os buffers.
+     for (int k = 1; k <= 2; k++)
+         if (const uint32_t n = arg(ctx, k))
+@@ -2129,8 +2366,6 @@
+         dump_draw(*c, arg(ctx, 1), arg(ctx, 2), arg(ctx, 3), arg(ctx, 4));
+     }
+     if (vk_on()) vk_draw(*c, arg(ctx, 1), arg(ctx, 2), arg(ctx, 3), arg(ctx, 4));
+-    if (c->in_scene && c->scene.draws.size() < 100000)
+-        c->scene.draws.push_back(DrawCall{ arg(ctx, 1), arg(ctx, 2), arg(ctx, 3), arg(ctx, 4), c->vprog, c->fprog });
+     ret(ctx, SCE_OK);
+ }
+ 
+@@ -2140,7 +2375,10 @@
+     const uint32_t bytes = prog ? rd32(prog + 0x64) * 4 : 0;
+     const uint32_t need = (bytes + 15) & ~15u;
+     if (!ring || !size) return 0;
+-    if (pos + need > size) pos = 0;
++    if (pos + need > size) {
++        if (vk_on()) gvk::sync_copies(); // o começo do anel volta a ser escrito: as cópias adiadas dele têm de ter saído
++        pos = 0;
++    }
+     const uint32_t a = ring + pos;
+     pos += need ? need : 16;
+     return a;
+@@ -2224,11 +2462,16 @@
+     const uint32_t st = arg(ctx, 1);
+     if (st && vk_on())
+         if (auto c = context_of(arg(ctx, 0))) {
+-            Context tmp = *c;
+-            tmp.vprog = rd32(st);
++            // troca programa e streams no próprio contexto e desfaz depois (copiar o Context inteiro alocava a cada desenho)
++            const uint32_t vprog = c->vprog;
++            uint32_t streams[8];
++            std::memcpy(streams, c->streams, sizeof streams);
++            c->vprog = rd32(st);
+             const uint32_t mem = rd32(st + 4);
+-            for (int i = 0; i < 8; i++) tmp.streams[i] = rd32(mem + 16 + 4 * i);
+-            vk_draw(tmp, rd32(mem), rd32(mem + 4), rd32(mem + 8), rd32(mem + 12));
++            for (int i = 0; i < 8; i++) c->streams[i] = rd32(mem + 16 + 4 * i);
++            vk_draw(*c, rd32(mem), rd32(mem + 4), rd32(mem + 8), rd32(mem + 12));
++            c->vprog = vprog;
++            std::memcpy(c->streams, streams, sizeof streams);
+         }
+     if (st && dumping())
+         if (auto c = context_of(arg(ctx, 0))) {
+@@ -2281,7 +2524,10 @@
+ VT_HLE(sceGxmPadHeartbeat) { ret(ctx, SCE_OK); }
+ VT_HLE(sceGxmSetRegionClip) {}
+ VT_HLE(sceGxmSetFrontPointLineWidth) {}
+-VT_HLE(sceGxmFinish) { ret(ctx, SCE_OK); }
++VT_HLE(sceGxmFinish) {
++    if (vk_on()) gvk::sync_copies();
++    ret(ctx, SCE_OK);
++}
+ VT_HLE(sceGxmGetNotificationRegion) {
+     // Região de notificações (palavras que a GPU escreve ao terminar): memória do guest zerada.
+     static const uint32_t region = new_object(0x1000, "gxm:notification-region");
+--- a/runtime/vitart/hle_io.cpp
++++ b/runtime/vitart/hle_io.cpp
+@@ -9,6 +9,7 @@
+ #include <cctype>
+ #include <fstream>
+ #include <iterator>
++#include <atomic>
+ #include <chrono>
+ #include <cstdarg>
+ #include <cstdio>
+@@ -550,7 +551,7 @@
+         g_hbink_async = 0;
+     }
+     if (now_ms() - g_video_read_ms > 500 || g_hbink_busy.exchange(true)) return -1;
+-    std::thread([gen, w, h, frames] {
++    vt::spawn_detached([gen, w, h, frames] {
+         const auto t0 = std::chrono::steady_clock::now();
+         const uint32_t a = hbink_find(w, h, frames);
+         static int logged = 0;
+@@ -560,7 +561,7 @@
+         if (a) g_hbink_async = a, g_hbink_async_gen = gen;
+         std::this_thread::sleep_for(std::chrono::milliseconds(a ? 0 : 200));
+         g_hbink_busy = false;
+-    }).detach();
++    });
+     return -1;
+ }
+ 
+@@ -700,9 +701,23 @@
+     g_files.erase(it);
+     ret(ctx, 0);
+ }
++#ifdef __SWITCH__
++std::atomic<uint64_t> g_io_calls{0}, g_io_bytes{0}, g_io_ns{0}; // lidos pelo vigia (hle_gxm.cpp)
++#endif
+ // Leitura/escrita posicional atômica (várias threads do jogo usam o mesmo descritor).
+ static int pio(int fd, uint32_t buf, uint32_t n, int64_t off, bool write) {
+     commit_range(buf, n);
++#ifdef __SWITCH__
++    const auto t0 = std::chrono::steady_clock::now();
++    const ssize_t r = write ? pwrite(fd, ptr<void>(buf), n, off) : pread(fd, ptr<void>(buf), n, off);
++    g_io_calls++, g_io_bytes += r > 0 ? (uint64_t)r : 0;
++    g_io_ns += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
++    if (r < 0) {
++        logf("vitart: E/S posicional falhou (errno %d, buf 0x%08x, %u bytes, offset %lld)", errno, buf, n, (long long)off);
++        return -1;
++    }
++    return (int)r;
++#else
+     HANDLE h = reinterpret_cast<HANDLE>(_get_osfhandle(fd));
+     OVERLAPPED ov{};
+     ov.Offset = (DWORD)off;
+@@ -714,6 +729,7 @@
+         return -1;
+     }
+     return (int)done;
++#endif
+ }
+ 
+ // VITART_PSARCLOG=1 (diagnóstico do carregador de mods): cada leitura do psarc com o instante, o offset, o tamanho, o
+--- a/runtime/vitart/hle_kernel.cpp
++++ b/runtime/vitart/hle_kernel.cpp
+@@ -3,6 +3,7 @@
+ // segue a documentação dos headers e o comportamento observado do sistema.
+ #include "vitart.h"
+ 
++#include <atomic>
+ #include <chrono>
+ #include <cstdio>
+ #include <ctime>
+@@ -45,6 +46,16 @@
+     return ok;
+ }
+ 
++// Como wait_for, contando a thread em `w` enquanto espera (quem sinaliza só acorda alguém se w > 0).
++template <class Lock, class Pred>
++static bool wait_for_w(std::condition_variable &cv, Lock &lock, uint32_t ptimeout, Pred pred, int &w) {
++    if (pred()) return true;
++    ++w;
++    const bool ok = wait_for(cv, lock, ptimeout, pred);
++    --w;
++    return ok;
++}
++
+ // =================================================================== threads
+ VT_HLE(sceKernelCreateThread) {
+     // (name, entry, initPriority, stackSize, attr, cpuAffinityMask, option)
+@@ -98,6 +109,7 @@
+     std::mutex m;
+     std::condition_variable cv;
+     int owner = 0, count = 0;
++    int waiters = 0; // threads paradas em cv (sob m): sem ninguém, destravar não chama o kernel
+     bool recursive = false;
+     std::string name;
+ };
+@@ -105,12 +117,14 @@
+     std::mutex m;
+     std::condition_variable cv;
+     int count = 0, max = 1;
++    int waiters = 0;
+     std::string name;
+ };
+ struct EventFlag {
+     std::mutex m;
+     std::condition_variable cv;
+     uint32_t bits = 0;
++    int waiters = 0;
+     std::string name;
+ };
+ struct LwCond {
+@@ -133,6 +147,22 @@
+ 
+ static int self_id() { return current() ? current()->id : -1; }
+ 
++// Toda criação/remoção em g_mutexes muda a geração e invalida os caches das threads.
++static std::atomic<uint32_t> g_mutex_gen{0};
++static Mutex *mutex_of(uint32_t key) {
++    struct E {
++        uint32_t key = 0, gen = ~0u;
++        std::shared_ptr<Mutex> p;
++    };
++    static thread_local E cache[16];
++    E &e = cache[(key >> 3) & 15];
++    const uint32_t g = g_mutex_gen.load(std::memory_order_acquire);
++    if (e.p && e.key == key && e.gen == g) return e.p.get();
++    e.p = get_obj(g_mutexes, key);
++    e.key = key, e.gen = g;
++    return e.p.get();
++}
++
+ static uint32_t mutex_lock(Mutex &mx, int count, uint32_t ptimeout, bool try_only) {
+     std::unique_lock<std::mutex> lock(mx.m);
+     const int me = self_id();
+@@ -144,7 +174,7 @@
+     }
+     if (try_only && mx.count > 0)
+         return ERR_MUTEX_FAILED_TO_OWN;
+-    if (!wait_for(mx.cv, lock, ptimeout, [&] { return mx.count == 0; }))
++    if (!wait_for_w(mx.cv, lock, ptimeout, [&] { return mx.count == 0; }, mx.waiters))
+         return ERR_WAIT_TIMEOUT;
+     mx.owner = me;
+     mx.count = count;
+@@ -158,8 +188,9 @@
+     if (mx.count <= 0) {
+         mx.count = 0;
+         mx.owner = 0;
++        const bool wake = mx.waiters > 0;
+         lock.unlock();
+-        mx.cv.notify_one();
++        if (wake) mx.cv.notify_one();
+     }
+     return SCE_OK;
+ }
+@@ -176,22 +207,24 @@
+     }
+     const std::lock_guard<std::mutex> lock(g_obj_mutex);
+     g_mutexes[uid] = mx;
++    g_mutex_gen.fetch_add(1);
+     ret(ctx, uid);
+ }
+ VT_HLE(sceKernelDeleteMutex) {
+     const std::lock_guard<std::mutex> lock(g_obj_mutex);
++    g_mutex_gen.fetch_add(1);
+     ret(ctx, g_mutexes.erase(arg(ctx, 0)) ? SCE_OK : ERR_UNKNOWN_UID);
+ }
+ VT_HLE(sceKernelLockMutex) {
+-    auto mx = get_obj(g_mutexes, arg(ctx, 0));
++    Mutex *mx = mutex_of(arg(ctx, 0));
+     ret(ctx, mx ? mutex_lock(*mx, (int)arg(ctx, 1), arg(ctx, 2), false) : ERR_UNKNOWN_UID);
+ }
+ VT_HLE(sceKernelTryLockMutex) {
+-    auto mx = get_obj(g_mutexes, arg(ctx, 0));
++    Mutex *mx = mutex_of(arg(ctx, 0));
+     ret(ctx, mx ? mutex_lock(*mx, (int)arg(ctx, 1), 0, true) : ERR_UNKNOWN_UID);
+ }
+ VT_HLE(sceKernelUnlockMutex) {
+-    auto mx = get_obj(g_mutexes, arg(ctx, 0));
++    Mutex *mx = mutex_of(arg(ctx, 0));
+     ret(ctx, mx ? mutex_unlock(*mx, (int)arg(ctx, 1)) : ERR_UNKNOWN_UID);
+ }
+ 
+@@ -209,29 +242,30 @@
+     wr32(arg(ctx, 0), new_uid()); // um id qualquer no work, como o sistema faz
+     const std::lock_guard<std::mutex> lock(g_obj_mutex);
+     g_mutexes[arg(ctx, 0)] = mx;
++    g_mutex_gen.fetch_add(1);
+     ret(ctx, SCE_OK);
+ }
+ VT_HLE(sceKernelDeleteLwMutex) {
+     const std::lock_guard<std::mutex> lock(g_obj_mutex);
+-    g_mutexes.erase(arg(ctx, 0));
++    g_mutex_gen.fetch_add(1), g_mutexes.erase(arg(ctx, 0));
+     ret(ctx, SCE_OK);
+ }
+ VT_HLE(sceKernelLockLwMutex) {
+-    auto mx = get_obj(g_mutexes, arg(ctx, 0));
++    Mutex *mx = mutex_of(arg(ctx, 0));
+     ret(ctx, mx ? mutex_lock(*mx, (int)arg(ctx, 1), arg(ctx, 2), false) : ERR_UNKNOWN_UID);
+ }
+ VT_HLE(sceKernelTryLockLwMutex) {
+-    auto mx = get_obj(g_mutexes, arg(ctx, 0));
++    Mutex *mx = mutex_of(arg(ctx, 0));
+     if (!mx) return ret(ctx, ERR_UNKNOWN_UID);
+     const uint32_t r = mutex_lock(*mx, (int)arg(ctx, 1), 0, true);
+     ret(ctx, r == SCE_OK ? SCE_OK : ERR_LW_MUTEX_FAILED_TO_OWN);
+ }
+ VT_HLE(sceKernelUnlockLwMutex) {
+-    auto mx = get_obj(g_mutexes, arg(ctx, 0));
++    Mutex *mx = mutex_of(arg(ctx, 0));
+     ret(ctx, mx ? mutex_unlock(*mx, (int)arg(ctx, 1)) : ERR_UNKNOWN_UID);
+ }
+ VT_HLE(sceKernelUnlockLwMutex2) {
+-    auto mx = get_obj(g_mutexes, arg(ctx, 0));
++    Mutex *mx = mutex_of(arg(ctx, 0));
+     ret(ctx, mx ? mutex_unlock(*mx, (int)arg(ctx, 1)) : ERR_UNKNOWN_UID);
+ }
+ 
+@@ -253,14 +287,14 @@
+ VT_HLE(sceKernelWaitLwCond) {
+     auto c = get_obj(g_lwconds, arg(ctx, 0));
+     if (!c) return ret(ctx, ERR_UNKNOWN_UID);
+-    auto mx = get_obj(g_mutexes, c->mutex_work);
++    Mutex *mx = mutex_of(c->mutex_work);
+     if (!mx) return ret(ctx, ERR_UNKNOWN_UID);
+     std::unique_lock<std::mutex> lock(mx->m);
+     if (mx->owner != self_id() || mx->count == 0) return ret(ctx, 0x800281C8u);
+     const int saved = mx->count;
+     mx->count = 0;
+     mx->owner = 0;
+-    mx->cv.notify_one();
++    if (mx->waiters) mx->cv.notify_one();
+     const uint32_t pto = arg(ctx, 1);
+     bool ok;
+     if (pto)
+@@ -269,7 +303,11 @@
+         c->cv.wait(lock);
+         ok = true;
+     }
+-    mx->cv.wait(lock, [&] { return mx->count == 0; });
++    if (mx->count != 0) {
++        ++mx->waiters;
++        mx->cv.wait(lock, [&] { return mx->count == 0; });
++        --mx->waiters;
++    }
+     mx->owner = self_id();
+     mx->count = saved;
+     ret(ctx, ok ? SCE_OK : ERR_WAIT_TIMEOUT);
+@@ -314,7 +352,7 @@
+     if (!s) return ret(ctx, ERR_UNKNOWN_UID);
+     const int need = (int)arg(ctx, 1);
+     std::unique_lock<std::mutex> lock(s->m);
+-    if (!wait_for(s->cv, lock, arg(ctx, 2), [&] { return s->count >= need; }))
++    if (!wait_for_w(s->cv, lock, arg(ctx, 2), [&] { return s->count >= need; }, s->waiters))
+         return ret(ctx, ERR_WAIT_TIMEOUT);
+     s->count -= need;
+     ret(ctx, SCE_OK);
+@@ -330,12 +368,14 @@
+ VT_HLE(sceKernelSignalSema) {
+     auto s = get_obj(g_semas, arg(ctx, 0));
+     if (!s) return ret(ctx, ERR_UNKNOWN_UID);
++    bool wake;
+     {
+         const std::lock_guard<std::mutex> lock(s->m);
+         if (s->count + (int)arg(ctx, 1) > s->max) return ret(ctx, 0x8002819Cu); // SEMA_OVF
+         s->count += (int)arg(ctx, 1);
++        wake = s->waiters > 0;
+     }
+-    s->cv.notify_all();
++    if (wake) s->cv.notify_all();
+     ret(ctx, SCE_OK);
+ }
+ 
+@@ -357,11 +397,13 @@
+ VT_HLE(sceKernelSetEventFlag) {
+     auto e = get_obj(g_evfs, arg(ctx, 0));
+     if (!e) return ret(ctx, ERR_UNKNOWN_UID);
++    bool wake;
+     {
+         const std::lock_guard<std::mutex> lock(e->m);
+         e->bits |= arg(ctx, 1);
++        wake = e->waiters > 0;
+     }
+-    e->cv.notify_all();
++    if (wake) e->cv.notify_all();
+     ret(ctx, SCE_OK);
+ }
+ VT_HLE(sceKernelClearEventFlag) {
+@@ -381,7 +423,7 @@
+     std::unique_lock<std::mutex> lock(e->m);
+     if (poll) {
+         if (!evf_match(e->bits, pattern, mode)) return ERR_EVF_COND;
+-    } else if (!wait_for(e->cv, lock, arg(ctx, 4), [&] { return evf_match(e->bits, pattern, mode); }))
++    } else if (!wait_for_w(e->cv, lock, arg(ctx, 4), [&] { return evf_match(e->bits, pattern, mode); }, e->waiters))
+         return ERR_WAIT_TIMEOUT;
+     if (pout) wr32(pout, e->bits);
+     if (mode & 2) e->bits = 0;                 // SCE_EVENT_WAITCLEAR
+--- a/runtime/vitart/hle_ngs.cpp
++++ b/runtime/vitart/hle_ngs.cpp
+@@ -439,7 +439,7 @@
+     auto it = g_cache.find(fi);
+     if (it != g_cache.end()) return it->second;
+     if (g_loading.insert(fi).second)
+-        std::thread([fi] {
++        vt::spawn_detached([fi] {
+             auto pcm = load_pcm(fi);
+             std::lock_guard<std::mutex> l(g_cache_m);
+             g_loading.erase(fi);
+@@ -452,7 +452,7 @@
+                 if (old != g_cache.end()) g_cache_bytes -= old->second->s.size() * sizeof(int16_t), g_cache.erase(old);
+                 g_lru.pop_front();
+             }
+-        }).detach();
++        });
+     return nullptr;
+ }
+ 
+--- a/runtime/vitart/hle_sys.cpp
++++ b/runtime/vitart/hle_sys.cpp
+@@ -19,6 +19,9 @@
+ #include <thread>
+ #include <unordered_map>
+ 
++#ifdef __SWITCH__
++#include <windows.h> // shim (nx/shim)
++#endif
+ #ifdef _WIN32
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
+--- a/runtime/vitart/pbr.cpp
++++ b/runtime/vitart/pbr.cpp
+@@ -259,7 +259,7 @@
+     s.job = job;
+     const Files files = g_index[key];
+     const bool flip = g_cfg.normal_opengl;
+-    std::thread([job, files, flip, key] {
++    vt::spawn_detached([job, files, flip, key] {
+         {
+             std::unique_lock<std::mutex> l(g_sem_mutex);
+             g_sem_cv.wait(l, [] { return g_running < 2; });
+@@ -289,7 +289,7 @@
+         }
+         g_sem_cv.notify_one();
+         job->done = true;
+-    }).detach();
++    });
+ }
+ 
+ // Última luz real vista (desenho com g_LightDir) para os desenhos do cenário, que não têm luz própria.
+--- a/runtime/vitart/vitart.h
++++ b/runtime/vitart/vitart.h
+@@ -26,6 +26,14 @@
+ 
+ namespace vt {
+ 
++// Thread do host destacada; no Switch com pilha grande (o C recompilado usa a pilha do host).
++#ifdef __SWITCH__
++void spawn_detached(std::function<void()> fn, const char *name = nullptr);
++#else
++#include <thread>
++inline void spawn_detached(std::function<void()> fn, const char * = nullptr) { std::thread(std::move(fn)).detach(); }
++#endif
++
+ // ---- log ----
+ void logf(const char *fmt, ...);
+ // chave=0/1 do vitart_options.ini que vale desde a abertura (console=, log=, texdump=, do Settings.exe)
