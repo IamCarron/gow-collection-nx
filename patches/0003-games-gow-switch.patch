@@ -1,3 +1,5 @@
+diff --git a/games/gow/game_options.cpp b/games/gow/game_options.cpp
+index 33a9d82..54cb9cc 100644
 --- a/games/gow/game_options.cpp
 +++ b/games/gow/game_options.cpp
 @@ -18,6 +18,9 @@
@@ -24,7 +26,30 @@
  #include "gxm_window.h"
  
  #include <cstdio>
-@@ -150,7 +160,7 @@
+@@ -79,7 +89,13 @@ struct Options {
+     bool inf_health = false, inf_magic = false, inf_rage = false; // cheats (cheats_tick)
+     bool hp_bars = true; // barras de vida dos inimigos (enemy_hp.cpp)
+     uint32_t aspecto = 1; // proporção da tela: 1 Auto (a do monitor), 2 16:9, 3 16:10, 4 21:9, 5 32:9, 6 4:3
++    uint32_t upscaler = 0, sharp = 8; // mod menu do Switch: 0 bilinear, 1 FSR 1.0; nitidez do FSR 0..10
++    bool drs = false; // resolução dinâmica: desligada (tirada do menu)
+ };
++// escala de cada código de resolução (5 = 720p: a altura do Vita, 408, levada a 720)
++// 5 = 720p (1270x720), 6 = resolução do Vita (960x544)
++float scale_f(uint32_t v) { return v == 5 ? 720.f / 408.f : v == 6 ? 544.f / 408.f : (float)v; }
++std::atomic<uint32_t> g_req_save{0};
+ // proporção de cada escolha do menu (1 = Auto, pelo monitor); nomes do ini na mesma ordem
+ const float kAspecto[] = {0.f, 0.f, 16.f / 9.f, 1.6f, 64.f / 27.f, 32.f / 9.f, 4.f / 3.f};
+ const char *kAspectoNome[] = {"", "auto", "16:9", "16:10", "21:9", "32:9", "4:3"};
+@@ -138,7 +154,7 @@ void save() {
+     std::vector<std::string> alheias;
+     if (FILE *f = fopen(ini_path().c_str(), "r")) {
+         static const char *nossas[] = {"#", "hd_textures=", "ps2_audio=", "resolution=", "fps=", "vsync=", "fps_counter=",
+-                                       "borderless=", "auto_qte=", "cheat_", "enemy_health_bars=", "mod_", "ps2_iso=", "aspect="};
++                                       "borderless=", "auto_qte=", "cheat_", "enemy_health_bars=", "mod_", "ps2_iso=", "aspect=", "upscaler=", "fsr_sharpness=", "dynamic_resolution="};
+         char line[1024];
+         while (fgets(line, sizeof line, f)) {
+             bool nossa = line[0] == '\n' || line[0] == '\r';
+@@ -150,7 +166,7 @@ void save() {
      const bool tem_api = std::any_of(alheias.begin(), alheias.end(), [](const std::string &l) { return !l.rfind("renderer=", 0); });
      if (FILE *f = fopen(ini_path().c_str(), "w")) {
          fprintf(f, "# Opções do PC (mudam pelo menu de pausa do jogo: Options)\n");
@@ -33,16 +58,43 @@
                  g_opt.tex ? 1u : 0u, g_opt.audio ? 1u : 0u, g_opt.scale, g_opt.fps == 3 ? "max" : g_opt.fps == 2 ? "60" : "30",
                  g_opt.vsync ? 1u : 0u, g_opt.counter ? 1u : 0u, g_opt.borderless ? 1u : 0u,
                  g_opt.auto_qte ? 1u : 0u);
-@@ -173,7 +183,7 @@
+@@ -158,6 +174,8 @@ void save() {
+                 g_opt.inf_magic ? 1u : 0u, g_opt.inf_rage ? 1u : 0u);
+         fprintf(f, "enemy_health_bars=%u\n", g_opt.hp_bars ? 1u : 0u);
+         fprintf(f, "aspect=%s\n", kAspectoNome[g_opt.aspecto >= 1 && g_opt.aspecto <= 6 ? g_opt.aspecto : 1]);
++        fprintf(f, "upscaler=%s\nfsr_sharpness=%u\n", g_opt.upscaler ? "fsr1" : "bilinear", g_opt.sharp);
++        fprintf(f, "dynamic_resolution=%u\n", g_opt.drs ? 1u : 0u);
+         if (!tem_api) fprintf(f, "renderer=%s\n", g_renderer.c_str());
+         for (const std::string &l : alheias) fprintf(f, "%s\n", l.c_str());
+         for (auto &[id, on] : g_mods) fprintf(f, "mod_%s=%u\n", id.c_str(), on ? 1u : 0u); // carregador de mods
+@@ -173,7 +191,7 @@ void load() {
              unsigned v = 0;
              if (sscanf(line, "hd_textures=%u", &v) == 1) g_opt.tex = v != 0;
              if (sscanf(line, "ps2_audio=%u", &v) == 1) g_opt.audio = v != 0;
 -            if (sscanf(line, "resolution=%u", &v) == 1) g_opt.scale = v <= 4 ? v : 0;
-+            if (sscanf(line, KRES "%u", &v) == 1) g_opt.scale = v <= 4 ? v : 0;
++            if (sscanf(line, KRES "%u", &v) == 1) g_opt.scale = v <= 6 ? v : 0;
              if (sscanf(line, "fps=%u", &v) == 1) g_opt.fps = v == 60 ? 2 : v > 60 ? 3 : 1;
              if (!strncmp(line, "fps=max", 7)) g_opt.fps = 3;
              if (sscanf(line, "fps_counter=%u", &v) == 1) g_opt.counter = v != 0;
-@@ -344,6 +354,12 @@
+@@ -184,6 +202,8 @@ void load() {
+             if (sscanf(line, "cheat_infinite_magic=%u", &v) == 1) g_opt.inf_magic = v != 0;
+             if (sscanf(line, "cheat_infinite_rage=%u", &v) == 1) g_opt.inf_rage = v != 0;
+             if (sscanf(line, "enemy_health_bars=%u", &v) == 1) g_opt.hp_bars = v != 0;
++            if (!strncmp(line, "upscaler=", 9)) g_opt.upscaler = ini_value(line, 9) == "fsr1" ? 1 : 0;
++            if (sscanf(line, "fsr_sharpness=%u", &v) == 1) g_opt.sharp = v <= 10 ? v : 8;
+             if (!strncmp(line, "aspect=", 7))
+                 for (uint32_t i = 1; i <= 6; i++)
+                     if (ini_value(line, 7) == kAspectoNome[i]) g_opt.aspecto = i;
+@@ -198,6 +218,8 @@ void load() {
+ }
+ 
+ uint32_t cur_scale() {
++    if (g_opt.scale == 5) return 2; // 720p: o menu do jogo só conhece 1x a 4x
++    if (g_opt.scale == 6) return 1; // 960x544
+     const uint32_t s = g_opt.scale ? g_opt.scale : gvk::auto_render_scale();
+     return s < 1 ? 1 : s > 4 ? 4 : s;
+ }
+@@ -344,6 +366,12 @@ const bool g_watch = (watch_import(on_import), true);
  // herói e carrega o R_Hero do checkpoint de novo, agora do mod. Só com a partida rodando e a fila parada.
  // abre o jogo de novo com a mesma linha de comando: herói, HUD e menus só são lidos na abertura
  void restart_process() {
@@ -55,7 +107,7 @@
      wchar_t exe[MAX_PATH] = {};
      GetModuleFileNameW(nullptr, exe, MAX_PATH);
      std::wstring cmd = GetCommandLineW();
-@@ -356,6 +372,7 @@
+@@ -356,6 +384,7 @@ void restart_process() {
          ExitProcess(0);
      }
      logf("vitart: não deu para reiniciar (CreateProcess %lu)", GetLastError());
@@ -63,7 +115,7 @@
  }
  
  bool qte_na_tela(); // lá embaixo, junto das tabelas do QTE automático
-@@ -440,12 +457,24 @@
+@@ -440,12 +469,27 @@ std::string renderer_choice() {
  }
  
  // Antes do primeiro quadro: aplica as escolhas salvas (texturas, áudio e resolução valem também no GoW2).
@@ -80,16 +132,20 @@
      texpack_set_enabled(g_opt.tex);
 +    OTRACE("init: ps2audio");
      ps2audio_set_enabled(g_opt.audio);
-+    OTRACE("init: scale");
-     if (g_opt.scale) gvk::set_render_scale(g_opt.scale);
+-    if (g_opt.scale) gvk::set_render_scale(g_opt.scale);
 -    gvk::set_fps_counter(g_opt.counter && !opt_profile()); // nos dois GoW o contador é o do HUD (FLP)
++    OTRACE("init: scale");
++    if (g_opt.scale) gvk::set_render_scale_f(scale_f(g_opt.scale));
++    g_opt.upscaler = 0; // FSR tirado do menu: sempre bilinear
++    gvk::set_upscaler(0, g_opt.sharp);
++    gvk::set_dynamic_res(g_opt.drs, g_opt.fps);
 +    OTRACE("init: fps");
 +    gvk::set_fps_counter(g_opt.counter && !opt_profile());
 +    OTRACE("init: borderless"); // nos dois GoW o contador é o do HUD (FLP)
      gvk::set_borderless(g_opt.borderless);
  }
  
-@@ -501,12 +530,19 @@
+@@ -501,12 +545,19 @@ void sonda_aspecto() {
  }
  
  void game_options_tick() {
@@ -110,7 +166,7 @@
      }
      // VITART_MEMSNAP=<pasta>:<s1>,<s2>,... (diagnóstico, para achar a vida e a magia): nos segundos pedidos despeja
      // a memória do guest em <pasta>/t<s> e anota os medidores do HUD (HealthMeter_Value/MagicMeter_Value, +0x14/+0x18
-@@ -532,6 +568,7 @@
+@@ -532,6 +583,7 @@ void game_options_tick() {
              when.erase(when.begin());
          }
      }
@@ -118,7 +174,7 @@
      // F11 / Alt+Enter também mudam o modo de exibição: a escolha acompanha (vale em todos os módulos)
      static bool applied_borderless = g_opt.borderless;
      if (const uint32_t v = g_req_dsp.exchange(0); v == 1 || v == 2) {
-@@ -552,6 +589,7 @@
+@@ -552,6 +604,7 @@ void game_options_tick() {
      };
      static const TimeProfile kGow1{0x812b75d0, 0x812b75e0, 0x812bc0c0};
      static const TimeProfile kGow2{0x812df6d0, 0x812df6e0, 0x812e40e0}; // menu: 1 só no menu principal (memória comparada)
@@ -126,18 +182,86 @@
      const TimeProfile *tp = is_gow1() ? &kGow1 : is_gow2() ? &kGow2 : nullptr;
      if (tp) {
          // VITART_MEMSNAP="q1,q2,...": grava a memória global do jogo (0x81000000..0x81800000, só o mapeado)
-@@ -662,7 +700,7 @@
-     if (const uint32_t v = g_req_res.exchange(0); v >= 1 && v <= 4 && v != cur_scale()) {
+@@ -659,11 +712,13 @@ void game_options_tick() {
+         g_opt.tex = v == 2, texpack_set_enabled(g_opt.tex), changed = true;
+     if (const uint32_t v = g_req_aud.exchange(0); v && ps2audio_available() && (v == 2) != g_opt.audio)
+         g_opt.audio = v == 2, ps2audio_set_enabled(g_opt.audio), changed = true;
+-    if (const uint32_t v = g_req_res.exchange(0); v >= 1 && v <= 4 && v != cur_scale()) {
++    if (const uint32_t v = g_req_res.exchange(0); v >= 1 && v <= 6 && v != (g_opt.scale >= 5 ? g_opt.scale : cur_scale())) {
          g_opt.scale = v, changed = true;
-         gvk::set_render_scale(v);
+-        gvk::set_render_scale(v);
 -        logf("vitart: resolução interna %ux (%ux%u)", v, 960 * v, 544 * v);
-+        logf("vitart: resolução interna %ux (%ux%u)", v, 720 * v, 408 * v);
++        gvk::set_render_scale_f(scale_f(v));
++        logf("vitart: resolução interna %.3fx (%ux%u)", scale_f(v), (unsigned)(720 * scale_f(v) + 0.5f),
++             (unsigned)(408 * scale_f(v) + 0.5f));
      }
++    if (g_req_save.exchange(0)) changed = true; // mod menu: escalonamento/nitidez
      if (const uint32_t v = g_req_asp.exchange(0); v >= 1 && v <= 6 && v != g_opt.aspecto) {
          g_opt.aspecto = v, changed = true;
+         logf("vitart: proporção da tela %s", kAspectoNome[v]);
+@@ -687,7 +742,7 @@ void game_options_tick() {
+         gvk::set_aspect_widen(w);
+     }
+     if (const uint32_t v = g_req_fps.exchange(0); v >= 1 && v <= 3 && v != g_opt.fps) {
+-        g_opt.fps = v, changed = true;
++        g_opt.fps = v, changed = true, gvk::set_dynamic_res(g_opt.drs, g_opt.fps);
+         logf("vitart: FPS %s", v == 3 ? "máximo" : v == 2 ? "60" : "30");
+     }
+     if (const uint32_t v = g_req_vsync.exchange(0); (v == 1 || v == 2) && (v == 2) != g_opt.vsync) {
+@@ -904,3 +959,48 @@ uint32_t game_qte_auto(uint8_t &lx, uint8_t &ly) {
+ }
+ 
+ } // namespace vt
++
++#ifdef __SWITCH__
++// Ponte do mod menu do Switch (nx_menu.cpp, thread Render). As opções do jogo vão pelos mesmos pedidos do menu de
++// pausa e valem no game_options_tick (depois que o menu fecha); o escalonamento vale na hora.
++#include "nx_menu.h"
++namespace nxopt {
++uint32_t get(int id) {
++    const auto &o = vt::g_opt;
++    switch (id) {
++    case RES: return o.scale ? o.scale : 1;
++    case DRS: return o.drs;
++    case SHARP: return o.sharp;
++    case FPS: return o.fps;
++    case VSYNC: return o.vsync;
++    case COUNTER: return o.counter;
++    case TEX: return o.tex;
++    case QTE: return o.auto_qte;
++    case HPBARS: return o.hp_bars;
++    case CH_HP: return o.inf_health;
++    case CH_MP: return o.inf_magic;
++    case CH_RAGE: return o.inf_rage;
++    }
++    return 0;
++}
++void set(int id, uint32_t v) {
++    using namespace vt;
++    const uint32_t b = v ? 2u : 1u;
++    switch (id) {
++    case RES: g_req_res = v; break;
++    case DRS: g_opt.drs = v != 0, gvk::set_dynamic_res(g_opt.drs, g_opt.fps), g_req_save = 1; break;
++    case SHARP: g_opt.sharp = v > 10 ? 10 : v, gvk::set_upscaler(g_opt.upscaler, g_opt.sharp), g_req_save = 1; break;
++    case FPS: g_req_fps = v; break;
++    case VSYNC: g_req_vsync = b; break;
++    case COUNTER: g_req_cnt = b; break;
++    case TEX: g_req_tex = b; break;
++    case QTE: g_req_qte = b; break;
++    case HPBARS: g_req_ehp = b; break;
++    case CH_HP: g_req_hp = b; break;
++    case CH_MP: g_req_mp = b; break;
++    case CH_RAGE: g_req_rage = b; break;
++    }
++}
++bool available(int id) { return id != TEX || vt::texpack_available(); }
++} // namespace nxopt
++#endif
+diff --git a/games/gow/kbm_icons.cpp b/games/gow/kbm_icons.cpp
+index 5aafa23..7a51474 100644
 --- a/games/gow/kbm_icons.cpp
 +++ b/games/gow/kbm_icons.cpp
-@@ -161,6 +161,9 @@
+@@ -161,6 +161,9 @@ void worker() {
  
  // liga a thread logo no começo do jogo
  void kbm_icons_start() {

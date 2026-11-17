@@ -3,6 +3,7 @@
 // L/R = L1/R1 (0x400/0x800), ZL/ZR = L2/R2 (0x100/0x200).
 #include "host_input.h"
 #include "vitart.h"
+#include "nx_menu.h"
 
 #include <switch.h>
 
@@ -58,6 +59,14 @@ State poll() {
     deadzone(s.lx, s.ly, 20);
     deadzone(s.rx, s.ry, 20);
     s.active = 4; // ícones de botão do Nintendo
+    // R + Plus é do mod menu (nx_menu.cpp): com R apertado o Plus não chega ao jogo; com o menu aberto (e até soltar
+    // os botões depois de fechar) o jogo recebe o controle parado
+    if (b & HidNpadButton_R) s.buttons &= ~START;
+    if (nxmenu::input_blocked()) {
+        State n;
+        n.active = 4;
+        return n;
+    }
     return s;
 }
 } // namespace hostin

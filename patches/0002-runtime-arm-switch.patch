@@ -1,3 +1,5 @@
+diff --git a/runtime/arm/arc.h b/runtime/arm/arc.h
+index 0fb16a8..054d500 100644
 --- a/runtime/arm/arc.h
 +++ b/runtime/arm/arc.h
 @@ -8,7 +8,14 @@
@@ -15,6 +17,8 @@
  extern const arc_func_entry arc_func_table[];
  extern const unsigned arc_func_count;
  extern const arc_segment arc_segments[];
+diff --git a/runtime/arm/arc_dll.c b/runtime/arm/arc_dll.c
+index 89db63d..0236b6f 100644
 --- a/runtime/arm/arc_dll.c
 +++ b/runtime/arm/arc_dll.c
 @@ -2,6 +2,7 @@
@@ -25,6 +29,8 @@
  #include "arc.h"
  #include "arc_host.h"
  
+diff --git a/runtime/arm/arc_runtime.c b/runtime/arm/arc_runtime.c
+index 936bd31..1d72cb3 100644
 --- a/runtime/arm/arc_runtime.c
 +++ b/runtime/arm/arc_runtime.c
 @@ -1,4 +1,5 @@

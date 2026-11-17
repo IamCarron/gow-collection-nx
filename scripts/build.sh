@@ -14,7 +14,7 @@ GAME=${GAME:-gow1}
 O=$ROOT/build/obj_$GAME
 GDEF=""; [ "$GAME" = gow2 ] && GDEF="-DGOW_GAME_GOW2"
 TITLE="God of War"; [ "$GAME" = gow2 ] && TITLE="God of War II"
-VERSION=${VERSION:-1.0}
+VERSION=${VERSION:-1.1}
 JOBS=${JOBS:-8}
 [ -d "$S/nx" ] || { echo "rode scripts/setup.sh antes"; exit 1; }
 for m in $GAME libc libfios2; do [ -f "$ROOT/build/mod/$m.o" ] || { echo "falta build/mod/$m.o (scripts/compile_mods.sh)"; exit 1; }; done
@@ -22,7 +22,7 @@ mkdir -p "$O"
 
 ARCH="-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE"
 COMMON="$ARCH -O3 -g0 -fno-omit-frame-pointer -w -ffunction-sections -fdata-sections -D__SWITCH__ -DVK_USE_PLATFORM_VI_NN -DGOW_GAME=\"$GAME\" $GDEF
- -I$DKP/libnx/include -I$DKP/portlibs/switch/include -I$S/vitart -I$S/arm -I$S/nx -I$S/nx/shim -I$S/gow
+ -I$DKP/libnx/include -I$DKP/portlibs/switch/include -I$S/vitart -I$S/arm -I$S/nx -I$S/nx/shim -I$S/gow -I$DKP/portlibs/switch/include/freetype2
  -I$TP/libatrac9/src -I$TP/stb -I$VK -I$VK/Volk"
 CXXFLAGS="$COMMON -std=gnu++20 -fexceptions -frtti -include $S/nx/nx_compat.h"
 CFLAGS="$COMMON -std=gnu11"
@@ -54,7 +54,7 @@ echo "== ligando $GAME.elf"
 "$B/aarch64-none-elf-g++" -specs="$DKP/libnx/switch.specs" $ARCH -Wl,-Map,"$ROOT/build/$GAME.map" -Wl,--gc-sections \
     -o "$ROOT/build/$GAME.elf" $OBJS "$ROOT/build/mod/$GAME.o" "$ROOT/build/mod/libc.o" "$ROOT/build/mod/libfios2.o" \
     -L"$DKP/portlibs/switch/lib" -L"$DKP/libnx/lib" \
-    -Wl,--whole-archive -lnvk -Wl,--no-whole-archive -Wl,--start-group -lnvk_support -lz -lexpat -Wl,--end-group \
+    -Wl,--whole-archive -lnvk -Wl,--no-whole-archive -Wl,--start-group -lnvk_support -lavformat -lavcodec -lswresample -lavutil -ldav1d -lfreetype -lharfbuzz -lbz2 -lpng16 -lz -lexpat -Wl,--end-group \
     -Wl,--wrap=fsFsOpenFile,--wrap=fsFsOpenDirectory,--wrap=fsFsCreateFile,--wrap=fsFsCreateDirectory,--wrap=fsFsGetEntryType -Wl,-u,vk_icdGetInstanceProcAddr -lnx -lm
 
 echo "== $GAME.nro"

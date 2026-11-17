@@ -55,35 +55,11 @@ void init() {
     // set_clocks() vem depois de abrir o log (core.cpp), senão a linha dos relógios se perde.
 }
 
-// CPU 1785 MHz e GPU no máximo do modo (460,8 MHz no portátil, 768 MHz na base) pelo clkrst. Se o processo não
-// tiver acesso ao serviço, fica nos relógios do sistema (o sys-clk pode cuidar disso).
+// Relógios de fábrica: o NRO não mexe em CPU/GPU/memória (nada de overclock); só registra os valores do sistema.
+void log_clocks();
 void set_clocks() {
-    if (R_FAILED(clkrstInitialize())) {
-        vt::logf("nx: clkrst indisponível, relógios do sistema");
-        return;
-    }
-    const bool docked = appletGetOperationMode() == AppletOperationMode_Console;
-    const u32 gpu = docked ? 768000000u : 460800000u;
-    // Nunca baixa um relógio já mais alto (overclock do sys-clk etc.): só sobe até o alvo do modo.
-    auto raise = [](PcvModuleId mod, u32 want, u32 &before, u32 &after) -> Result {
-        ClkrstSession s;
-        Result rc = clkrstOpenSession(&s, mod, 3);
-        if (R_FAILED(rc)) return rc;
-        before = 0;
-        clkrstGetClockRate(&s, &before);
-        rc = 0;
-        if (before < want) rc = clkrstSetClockRate(&s, want);
-        after = 0;
-        clkrstGetClockRate(&s, &after);
-        clkrstCloseSession(&s);
-        return rc;
-    };
-    u32 cpu0 = 0, cpu1 = 0, gpu0 = 0, gpu1 = 0;
-    const Result rc_cpu = raise(PcvModuleId_CpuBus, 1785000000u, cpu0, cpu1);
-    const Result rc_gpu = raise(PcvModuleId_GPU, gpu, gpu0, gpu1);
-    clkrstExit();
-    vt::logf("nx: relógios (%s): CPU %u -> %u MHz (0x%x), GPU %u -> %u MHz (0x%x)", docked ? "base" : "portátil", cpu0 / 1000000,
-             cpu1 / 1000000, rc_cpu, gpu0 / 1000000, gpu1 / 1000000, rc_gpu);
+    vt::logf("nx: relógios de fábrica (sem overclock)");
+    log_clocks();
 }
 
 // Relógios atuais (CPU, GPU, memória) no log: mostra se o overclock está valendo durante o jogo.

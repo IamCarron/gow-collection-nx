@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1-nx
+
+- **Menu de mods** no jogo (**R + Plus**): resolução interna, taxa de quadros, VSync, contador de FPS, texturas HD e
+  barras de vida dos inimigos, com fonte do sistema; as escolhas vão para `data/vitart_options.ini`.
+- **Resoluções novas**: *Vita (960x544)* (a nativa do Vita, ~43% menos pixels que 720p) e *720p (1270x720)*, além de
+  1x a 4x.
+- **Vídeos HD**: cenas remasterizadas em `.mp4` (HEVC/H.264) decodificadas no NVDEC do Tegra via FFmpeg e convertidas
+  de NV12 para RGBA num compute shader; o Bink do jogo continua cuidando do som e do pular. Sem a pasta `videos`,
+  nada muda.
+- **Relógios de fábrica**: o port não faz mais overclock (CPU 1020 MHz, GPU 307 MHz no portátil).
+- **Diagnóstico de GPU** no log: tempo por alvo de render, tempo fora dos passes, GPU parada entre envios e espera
+  da apresentação, para achar o que pesa em cada cena.
+- Swapchain com uma imagem a mais de folga.
+
 ## v1.0-nx
 
 Primeira versão pública.

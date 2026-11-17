@@ -5,10 +5,11 @@ port e compilar os NROs.
 
 ## 1. Ferramentas
 
-- **devkitPro** com `devkitA64`, `libnx` e os portlibs `switch-freetype`, `switch-mpg123`, `switch-zlib`, `switch-expat`:
+- **devkitPro** com `devkitA64`, `libnx` e os portlibs `switch-freetype`, `switch-harfbuzz`, `switch-mpg123`, `switch-ffmpeg`, `switch-dav1d`, `switch-zlib`,
+  `switch-bzip2`, `switch-libpng`, `switch-expat`:
 
   ```bash
-  pacman -S switch-dev switch-freetype switch-mpg123 switch-zlib switch-expat
+  pacman -S switch-dev switch-freetype switch-harfbuzz switch-mpg123 switch-ffmpeg switch-dav1d switch-zlib switch-bzip2 switch-libpng switch-expat
   ```
 
 - **NVK para Switch** (`libnvk.a` e `libnvk_support.a`, Mesa) instalado em `$DEVKITPRO/portlibs/switch/lib`.
