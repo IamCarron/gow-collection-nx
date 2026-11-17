@@ -143,10 +143,20 @@ completo, incluindo a geração do código a partir da sua cópia: [docs/BUILDIN
 
 O port é grátis e o código é aberto. As ferramentas que uso para fazer estes ports são **pagas**, e cada doação
 ajuda a mantê-las e a continuar o projeto. Quer ver outro jogo portado ou uma melhoria? **Faça seu pedido junto com
-a sua doação** (escreva na mensagem do Ko-fi ou do PayPal).
+a sua doação** (escreva na mensagem do Ko-fi, do PayPal ou do Pix).
 
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-apoiar-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/gerissoncassiano)
 [![PayPal](https://img.shields.io/badge/PayPal-doar-00457C?style=for-the-badge&logo=paypal&logoColor=white)](https://www.paypal.com/donate/?hosted_button_id=B3YTKT29F5ZLG)
+
+Ou por **PIX** (chave e-mail): `pocketneogames@gmail.com`
+
+<img src=".github/pix-qr.png" alt="QR Code PIX" width="200">
+
+PIX copia e cola:
+
+```text
+00020126460014br.gov.bcb.pix0124pocketneogames@gmail.com5204000053039865802BR5911RECOMP GUTO6006BRASIL62070503***63048D6B
+```
 
 ## 🙏 Créditos
 

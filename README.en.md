@@ -143,10 +143,20 @@ The detailed docs are in Portuguese.
 
 The port is free and open source. The tools I use to make these ports are **paid**, and every donation helps keep
 them and the project going. Want another game ported or an improvement? **Send your request with your donation**
-(write it in the Ko-fi or PayPal message).
+(write it in the Ko-fi, PayPal or Pix message).
 
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-support-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/gerissoncassiano)
 [![PayPal](https://img.shields.io/badge/PayPal-donate-00457C?style=for-the-badge&logo=paypal&logoColor=white)](https://www.paypal.com/donate/?hosted_button_id=B3YTKT29F5ZLG)
+
+Or via **PIX** (Brazil, e-mail key): `pocketneogames@gmail.com`
+
+<img src=".github/pix-qr.png" alt="PIX QR code" width="200">
+
+PIX copy-and-paste code:
+
+```text
+00020126460014br.gov.bcb.pix0124pocketneogames@gmail.com5204000053039865802BR5911RECOMP GUTO6006BRASIL62070503***63048D6B
+```
 
 ## 🙏 Credits
 
