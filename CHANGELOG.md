@@ -1,5 +1,7 @@
 # Changelog
 
+**Português** · [English](CHANGELOG.en.md)
+
 ## v1.2-nx
 
 Foco: **mais FPS em 720p no relógio padrão** (CPU 1020 MHz, GPU 307 MHz, sem overclock).

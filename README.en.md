@@ -62,7 +62,7 @@ runtime** (as patches), the **launcher** and the build scripts.
 
 > [!NOTE]
 > **v1.2:** *God of War* at 720p runs at **~45–60 FPS on stock clocks** (max FPS), up from ~22 FPS in heavy
-> scenes on v1.0. Details in the [CHANGELOG](CHANGELOG.md).
+> scenes on v1.0. Details in the [CHANGELOG](CHANGELOG.en.md).
 
 Measured on real hardware, handheld mode. The effect of each optimization is in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
@@ -134,7 +134,7 @@ generating the code from your copy: [docs/BUILDING.md](docs/BUILDING.md) (Portug
 
 | Document | Contents |
 |---|---|
-| [CHANGELOG.md](CHANGELOG.md) | Changes per version |
+| [CHANGELOG.en.md](CHANGELOG.en.md) | Changes per version |
 | [docs/BUILDING.md](docs/BUILDING.md) | Generating the code, building and laying out the SD |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | Launcher, options, clocks, saves and logs |
 | [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | Threads, optimizations and measurements |
