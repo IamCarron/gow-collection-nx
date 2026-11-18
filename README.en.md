@@ -168,6 +168,8 @@ PIX copy-and-paste code:
   — luisxl15: the static recompiler and PS Vita runtime this port builds on (not included here)
 - **[devkitPro](https://devkitpro.org/)** — devkitA64, libnx and the Switch portlibs
 - **[Mesa / NVK](https://docs.mesa3d.org/drivers/nvk.html)** — the Vulkan driver used on Switch
+- **[mvhoang92](https://github.com/mvhoang92)** — console testing and the diagnosis behind the v1.3 fixes (undrawn edge, FPS counter,
+  *God of War II* shaders)
 - Libraries: [libatrac9](https://github.com/Thealexbarney/LibAtrac9), [volk](https://github.com/zeux/volk),
   [mpg123](https://www.mpg123.de/), [FreeType](https://freetype.org/) — see
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)

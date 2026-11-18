@@ -37,8 +37,33 @@ python -P -m vitarecomp recomp --link out/g2/link.json --module gow2 -o out/gen/
 3. traduzir os shaders para SPIR-V (ferramentas do vitaRT) e empacotar:
 
 ```bash
-python tools/pack_shaders.py <pasta com os .spv> shaders.pak
+python <vitaRT>/tools/usse_build_cache.py spv <vitaRT>/spv/miss
+python tools/pack_shaders.py spv shaders.pak
 ```
+
+### Completar os shaders jogando (necessário para o *God of War II*)
+
+Os programas de shader (GXP) não ficam soltos nos `.psarc`: eles só existem na memória quando o jogo os carrega. O
+conjunto que vem em `vitaRT/spv/miss` cobre quase só o *God of War* (cerca de 4.700 programas). Um pack completo
+para os dois jogos tem cerca de **9.700**. Com o pack incompleto, o *God of War II* **fica parado na primeira tela de
+carregamento** (GPU em 0%), e o log mostra centenas de linhas `vitart: programa 0x... sem spv no cache (<hash>)`.
+
+Quando falta um programa, o port grava o binário dele em `sdmc:/switch/gow-nx/shaders/miss/<hash>.gxp`. Para
+completar o pack:
+
+1. Jogue até a parada (ou até onde quiser cobrir) e feche o jogo pelo HOME.
+2. Copie `shaders/miss/*.gxp` do SD para o PC, por exemplo para `miss_sd/`.
+3. Traduza só o que falta (os `.spv` que já existem não são refeitos) e reempacote:
+
+   ```bash
+   python <vitaRT>/tools/usse_build_cache.py spv miss_sd
+   python tools/pack_shaders.py spv shaders.pak
+   ```
+
+4. Copie o `shaders.pak` novo para `sdmc:/switch/gow-nx/shaders/` e apague a pasta `shaders/miss` do SD.
+5. Repita até o log não mostrar mais `sem spv no cache`. Em geral bastam duas ou três rodadas por jogo.
+
+Os `.gxp` e `.spv` são derivados do jogo: não os compartilhe. Cada um gera os seus a partir da própria cópia.
 
 ## 3. Fontes do port
 

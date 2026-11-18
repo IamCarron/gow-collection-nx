@@ -1,5 +1,5 @@
 diff --git a/games/gow/game_options.cpp b/games/gow/game_options.cpp
-index 33a9d82..bb35ed5 100644
+index 33a9d82..3415219 100644
 --- a/games/gow/game_options.cpp
 +++ b/games/gow/game_options.cpp
 @@ -18,6 +18,9 @@
@@ -26,7 +26,17 @@ index 33a9d82..bb35ed5 100644
  #include "gxm_window.h"
  
  #include <cstdio>
-@@ -79,7 +89,13 @@ struct Options {
+@@ -70,6 +80,9 @@ struct OptProfile {
+ constexpr OptProfile kOptGow1{0x812a681c, 0x8120c534, 0x2bc, 0x811d1a70, 0x811fbdf4};
+ constexpr OptProfile kOptGow2{0x812cb1b8, 0x8122e050, 0x3e0, 0x811f5510, 0x8121e8d0};
+ const OptProfile *opt_profile();
++} // namespace
++bool psarc_mods_loaded(); // hle_io.cpp
++namespace {
+ struct Options {
+     bool tex = true, audio = true, counter = false, borderless = false;
+     uint32_t fps = 1; // 1 = 30, 2 = 60, 3 = máximo (taxa do monitor, sem acelerar o jogo)
+@@ -79,11 +92,20 @@ struct Options {
      bool inf_health = false, inf_magic = false, inf_rage = false; // cheats (cheats_tick)
      bool hp_bars = true; // barras de vida dos inimigos (enemy_hp.cpp)
      uint32_t aspecto = 1; // proporção da tela: 1 Auto (a do monitor), 2 16:9, 3 16:10, 4 21:9, 5 32:9, 6 4:3
@@ -40,7 +50,14 @@ index 33a9d82..bb35ed5 100644
  // proporção de cada escolha do menu (1 = Auto, pelo monitor); nomes do ini na mesma ordem
  const float kAspecto[] = {0.f, 0.f, 16.f / 9.f, 1.6f, 64.f / 27.f, 32.f / 9.f, 4.f / 3.f};
  const char *kAspectoNome[] = {"", "auto", "16:9", "16:10", "21:9", "32:9", "4:3"};
-@@ -137,8 +153,8 @@ void save() {
+ Options g_opt;
++// Contador de FPS: nos dois GoW, com o mod do menu de pausa (.psarc.vtpatch) o contador é o do HUD (FLP); sem o mod o
++// HUD não tem o elemento, então usa o contador do vitart (overlay).
++void apply_fps_counter() { gvk::set_fps_counter(g_opt.counter && !(opt_profile() && psarc_mods_loaded())); }
+ // Pedidos vindos do menu (thread do jogo), aplicados no próximo quadro: 0 = nenhum.
+ std::atomic<uint32_t> g_req_ehp{0}, g_req_asp{0};
+ std::atomic<uint32_t> g_req_tex{0}, g_req_aud{0}, g_req_res{0}, g_req_fps{0}, g_req_cnt{0}, g_req_dsp{0}, g_req_vsync{0}, g_req_qte{0},
+@@ -137,8 +159,8 @@ void save() {
      // o Settings pode ter trocado com o jogo aberto (vale na próxima abertura)
      std::vector<std::string> alheias;
      if (FILE *f = fopen(ini_path().c_str(), "r")) {
@@ -51,7 +68,7 @@ index 33a9d82..bb35ed5 100644
          char line[1024];
          while (fgets(line, sizeof line, f)) {
              bool nossa = line[0] == '\n' || line[0] == '\r';
-@@ -150,7 +166,7 @@ void save() {
+@@ -150,7 +172,7 @@ void save() {
      const bool tem_api = std::any_of(alheias.begin(), alheias.end(), [](const std::string &l) { return !l.rfind("renderer=", 0); });
      if (FILE *f = fopen(ini_path().c_str(), "w")) {
          fprintf(f, "# Opções do PC (mudam pelo menu de pausa do jogo: Options)\n");
@@ -60,7 +77,7 @@ index 33a9d82..bb35ed5 100644
                  g_opt.tex ? 1u : 0u, g_opt.audio ? 1u : 0u, g_opt.scale, g_opt.fps == 3 ? "max" : g_opt.fps == 2 ? "60" : "30",
                  g_opt.vsync ? 1u : 0u, g_opt.counter ? 1u : 0u, g_opt.borderless ? 1u : 0u,
                  g_opt.auto_qte ? 1u : 0u);
-@@ -158,6 +174,8 @@ void save() {
+@@ -158,6 +180,8 @@ void save() {
                  g_opt.inf_magic ? 1u : 0u, g_opt.inf_rage ? 1u : 0u);
          fprintf(f, "enemy_health_bars=%u\n", g_opt.hp_bars ? 1u : 0u);
          fprintf(f, "aspect=%s\n", kAspectoNome[g_opt.aspecto >= 1 && g_opt.aspecto <= 6 ? g_opt.aspecto : 1]);
@@ -69,7 +86,7 @@ index 33a9d82..bb35ed5 100644
          if (!tem_api) fprintf(f, "renderer=%s\n", g_renderer.c_str());
          for (const std::string &l : alheias) fprintf(f, "%s\n", l.c_str());
          for (auto &[id, on] : g_mods) fprintf(f, "mod_%s=%u\n", id.c_str(), on ? 1u : 0u); // carregador de mods
-@@ -173,7 +191,7 @@ void load() {
+@@ -173,7 +197,7 @@ void load() {
              unsigned v = 0;
              if (sscanf(line, "hd_textures=%u", &v) == 1) g_opt.tex = v != 0;
              if (sscanf(line, "ps2_audio=%u", &v) == 1) g_opt.audio = v != 0;
@@ -78,7 +95,7 @@ index 33a9d82..bb35ed5 100644
              if (sscanf(line, "fps=%u", &v) == 1) g_opt.fps = v == 60 ? 2 : v > 60 ? 3 : 1;
              if (!strncmp(line, "fps=max", 7)) g_opt.fps = 3;
              if (sscanf(line, "fps_counter=%u", &v) == 1) g_opt.counter = v != 0;
-@@ -184,6 +202,8 @@ void load() {
+@@ -184,6 +208,8 @@ void load() {
              if (sscanf(line, "cheat_infinite_magic=%u", &v) == 1) g_opt.inf_magic = v != 0;
              if (sscanf(line, "cheat_infinite_rage=%u", &v) == 1) g_opt.inf_rage = v != 0;
              if (sscanf(line, "enemy_health_bars=%u", &v) == 1) g_opt.hp_bars = v != 0;
@@ -87,7 +104,7 @@ index 33a9d82..bb35ed5 100644
              if (!strncmp(line, "aspect=", 7))
                  for (uint32_t i = 1; i <= 6; i++)
                      if (ini_value(line, 7) == kAspectoNome[i]) g_opt.aspecto = i;
-@@ -198,6 +218,8 @@ void load() {
+@@ -198,6 +224,8 @@ void load() {
  }
  
  uint32_t cur_scale() {
@@ -96,7 +113,7 @@ index 33a9d82..bb35ed5 100644
      const uint32_t s = g_opt.scale ? g_opt.scale : gvk::auto_render_scale();
      return s < 1 ? 1 : s > 4 ? 4 : s;
  }
-@@ -344,6 +366,12 @@ const bool g_watch = (watch_import(on_import), true);
+@@ -344,6 +372,12 @@ const bool g_watch = (watch_import(on_import), true);
  // herói e carrega o R_Hero do checkpoint de novo, agora do mod. Só com a partida rodando e a fila parada.
  // abre o jogo de novo com a mesma linha de comando: herói, HUD e menus só são lidos na abertura
  void restart_process() {
@@ -109,7 +126,7 @@ index 33a9d82..bb35ed5 100644
      wchar_t exe[MAX_PATH] = {};
      GetModuleFileNameW(nullptr, exe, MAX_PATH);
      std::wstring cmd = GetCommandLineW();
-@@ -356,6 +384,7 @@ void restart_process() {
+@@ -356,6 +390,7 @@ void restart_process() {
          ExitProcess(0);
      }
      logf("vitart: não deu para reiniciar (CreateProcess %lu)", GetLastError());
@@ -117,7 +134,7 @@ index 33a9d82..bb35ed5 100644
  }
  
  bool qte_na_tela(); // lá embaixo, junto das tabelas do QTE automático
-@@ -440,12 +469,27 @@ std::string renderer_choice() {
+@@ -440,12 +475,27 @@ std::string renderer_choice() {
  }
  
  // Antes do primeiro quadro: aplica as escolhas salvas (texturas, áudio e resolução valem também no GoW2).
@@ -142,12 +159,12 @@ index 33a9d82..bb35ed5 100644
 +    gvk::set_upscaler(0, g_opt.sharp);
 +    gvk::set_dynamic_res(g_opt.drs, g_opt.fps);
 +    OTRACE("init: fps");
-+    gvk::set_fps_counter(g_opt.counter && !opt_profile());
-+    OTRACE("init: borderless"); // nos dois GoW o contador é o do HUD (FLP)
++    apply_fps_counter();
++    OTRACE("init: borderless");
      gvk::set_borderless(g_opt.borderless);
  }
  
-@@ -501,12 +545,19 @@ void sonda_aspecto() {
+@@ -501,12 +551,19 @@ void sonda_aspecto() {
  }
  
  void game_options_tick() {
@@ -168,7 +185,7 @@ index 33a9d82..bb35ed5 100644
      }
      // VITART_MEMSNAP=<pasta>:<s1>,<s2>,... (diagnóstico, para achar a vida e a magia): nos segundos pedidos despeja
      // a memória do guest em <pasta>/t<s> e anota os medidores do HUD (HealthMeter_Value/MagicMeter_Value, +0x14/+0x18
-@@ -532,6 +583,7 @@ void game_options_tick() {
+@@ -532,6 +589,7 @@ void game_options_tick() {
              when.erase(when.begin());
          }
      }
@@ -176,7 +193,7 @@ index 33a9d82..bb35ed5 100644
      // F11 / Alt+Enter também mudam o modo de exibição: a escolha acompanha (vale em todos os módulos)
      static bool applied_borderless = g_opt.borderless;
      if (const uint32_t v = g_req_dsp.exchange(0); v == 1 || v == 2) {
-@@ -552,6 +604,7 @@ void game_options_tick() {
+@@ -552,6 +610,7 @@ void game_options_tick() {
      };
      static const TimeProfile kGow1{0x812b75d0, 0x812b75e0, 0x812bc0c0};
      static const TimeProfile kGow2{0x812df6d0, 0x812df6e0, 0x812e40e0}; // menu: 1 só no menu principal (memória comparada)
@@ -184,7 +201,7 @@ index 33a9d82..bb35ed5 100644
      const TimeProfile *tp = is_gow1() ? &kGow1 : is_gow2() ? &kGow2 : nullptr;
      if (tp) {
          // VITART_MEMSNAP="q1,q2,...": grava a memória global do jogo (0x81000000..0x81800000, só o mapeado)
-@@ -582,7 +635,11 @@ void game_options_tick() {
+@@ -582,7 +641,11 @@ void game_options_tick() {
              }
          }
          // VITART_TIMEDUMP=1 (depuração): a soma do dt do jogo contra o relógio, a cada 10 s
@@ -196,7 +213,7 @@ index 33a9d82..bb35ed5 100644
              static double game_t = 0;
              static uint32_t nframes = 0;
              static auto t0 = std::chrono::steady_clock::now();
-@@ -592,8 +649,13 @@ void game_options_tick() {
+@@ -592,8 +655,13 @@ void game_options_tick() {
              if (std::isfinite(dtv) && dtv > 0 && dtv < 1) game_t += dtv, nframes++;
              const double real = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
              if (real >= 10) {
@@ -212,7 +229,7 @@ index 33a9d82..bb35ed5 100644
                  game_t = 0, nframes = 0, t0 = std::chrono::steady_clock::now();
              }
          }
-@@ -659,11 +721,18 @@ void game_options_tick() {
+@@ -659,11 +727,18 @@ void game_options_tick() {
          g_opt.tex = v == 2, texpack_set_enabled(g_opt.tex), changed = true;
      if (const uint32_t v = g_req_aud.exchange(0); v && ps2audio_available() && (v == 2) != g_opt.audio)
          g_opt.audio = v == 2, ps2audio_set_enabled(g_opt.audio), changed = true;
@@ -221,11 +238,10 @@ index 33a9d82..bb35ed5 100644
          g_opt.scale = v, changed = true;
 -        gvk::set_render_scale(v);
 -        logf("vitart: resolução interna %ux (%ux%u)", v, 960 * v, 544 * v);
--    }
 +        gvk::set_render_scale_f(scale_f(v));
 +        logf("vitart: resolução interna %.3fx (%ux%u)", scale_f(v), (unsigned)(720 * scale_f(v) + 0.5f),
 +             (unsigned)(408 * scale_f(v) + 0.5f));
-+    }
+     }
 +#ifdef __SWITCH__
 +    // GPU 460 com 720p: desligado a pedido (relógios de fábrica). VITART_GPU460=1 liga para teste.
 +    static const bool gpu460 = getenv("VITART_GPU460") != nullptr;
@@ -235,7 +251,7 @@ index 33a9d82..bb35ed5 100644
      if (const uint32_t v = g_req_asp.exchange(0); v >= 1 && v <= 6 && v != g_opt.aspecto) {
          g_opt.aspecto = v, changed = true;
          logf("vitart: proporção da tela %s", kAspectoNome[v]);
-@@ -687,7 +756,7 @@ void game_options_tick() {
+@@ -687,7 +762,7 @@ void game_options_tick() {
          gvk::set_aspect_widen(w);
      }
      if (const uint32_t v = g_req_fps.exchange(0); v >= 1 && v <= 3 && v != g_opt.fps) {
@@ -244,7 +260,15 @@ index 33a9d82..bb35ed5 100644
          logf("vitart: FPS %s", v == 3 ? "máximo" : v == 2 ? "60" : "30");
      }
      if (const uint32_t v = g_req_vsync.exchange(0); (v == 1 || v == 2) && (v == 2) != g_opt.vsync) {
-@@ -904,3 +973,48 @@ uint32_t game_qte_auto(uint8_t &lx, uint8_t &ly) {
+@@ -705,6 +780,7 @@ void game_options_tick() {
+     if (const uint32_t v = g_req_cnt.exchange(0); (v == 1 || v == 2) && (v == 2) != g_opt.counter) {
+         g_opt.counter = v == 2, changed = true;
+     }
++    apply_fps_counter(); // o patch do psarc pode entrar depois do init (o jogo abre o psarc mais tarde)
+     for (auto [req, opt, what] : {std::tuple{&g_req_hp, &g_opt.inf_health, "vida infinita"},
+                                   std::tuple{&g_req_mp, &g_opt.inf_magic, "magia infinita"},
+                                   std::tuple{&g_req_rage, &g_opt.inf_rage, "fúria infinita"}})
+@@ -904,3 +980,48 @@ uint32_t game_qte_auto(uint8_t &lx, uint8_t &ly) {
  }
  
  } // namespace vt

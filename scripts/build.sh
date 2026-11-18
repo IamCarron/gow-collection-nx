@@ -14,7 +14,7 @@ GAME=${GAME:-gow1}
 O=$ROOT/build/obj_$GAME
 GDEF=""; [ "$GAME" = gow2 ] && GDEF="-DGOW_GAME_GOW2"
 TITLE="God of War"; [ "$GAME" = gow2 ] && TITLE="God of War II"
-VERSION=${VERSION:-1.2}
+VERSION=${VERSION:-1.3}
 JOBS=${JOBS:-8}
 [ -d "$S/nx" ] || { echo "rode scripts/setup.sh antes"; exit 1; }
 for m in $GAME libc libfios2; do [ -f "$ROOT/build/mod/$m.o" ] || { echo "falta build/mod/$m.o (scripts/compile_mods.sh)"; exit 1; }; done

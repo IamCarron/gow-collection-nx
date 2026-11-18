@@ -1675,7 +1675,7 @@ index 438d3ea..9a83834 100644
  bool is_borderless() { return TO(is_borderless); }
  bool draw(const Draw &d) { return TO(draw, d); }
 diff --git a/runtime/vitart/gxm_vk.cpp b/runtime/vitart/gxm_vk.cpp
-index abb386c..1bf0ae4 100644
+index abb386c..4d569e2 100644
 --- a/runtime/vitart/gxm_vk.cpp
 +++ b/runtime/vitart/gxm_vk.cpp
 @@ -7,23 +7,47 @@
@@ -1747,7 +1747,7 @@ index abb386c..1bf0ae4 100644
  VkSurfaceKHR g_surface = VK_NULL_HANDLE;
  VkSwapchainKHR g_swap = VK_NULL_HANDLE;
  std::vector<VkImage> g_swap_images;
-@@ -76,38 +105,61 @@ constexpr VkFormat kColor = VK_FORMAT_R8G8B8A8_UNORM, kDepth = VK_FORMAT_D32_SFL
+@@ -76,38 +105,66 @@ constexpr VkFormat kColor = VK_FORMAT_R8G8B8A8_UNORM, kDepth = VK_FORMAT_D32_SFL
  constexpr VkImageAspectFlags kDepthAspects = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
  
  Stats g_stats;
@@ -1793,6 +1793,11 @@ index abb386c..1bf0ae4 100644
 -uint32_t scale_now() { return g_scale_override ? g_scale_override : scale_auto(); }
 +float g_drs_scale_pub = 0;       // resolução dinâmica (drs_tick, mais abaixo)
 +uint64_t g_drs_ns_pub = 0;
++// meio pixel do viewport, em pixels do guest (ver a montagem do viewport no desenho)
++static float vk_halfpix() {
++    static const float v = getenv("VITART_VK_HALFPIX") ? (float)std::atof(getenv("VITART_VK_HALFPIX")) : 0.5f;
++    return v;
++}
 +float scale_now() { return g_drs_scale_pub > 0 ? g_drs_scale_pub : g_scale_override > 0 ? g_scale_override : scale_auto(); }
 +uint32_t scaled(uint32_t g, float s) { const uint32_t v = (uint32_t)(g * s + 0.5f); return v ? v : 1; }
  // Ultrawide: os alvos com cara de tela (720x408, as metades e quartos usados nos passes de tela cheia) ficam g_widen
@@ -1816,7 +1821,7 @@ index abb386c..1bf0ae4 100644
  double g_ts_period = 1.0; // ns por tique de timestamp
  uint64_t now_ns() {
      return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-@@ -136,6 +188,10 @@ bool fail(const char *what, VkResult r) {
+@@ -136,6 +193,10 @@ bool fail(const char *what, VkResult r) {
      char b[160];
      std::snprintf(b, sizeof b, "%s falhou (VkResult %d)", what, (int)r);
      g_err = b;
@@ -1827,7 +1832,7 @@ index abb386c..1bf0ae4 100644
      return false;
  }
  #define VKC(call)                                   \
-@@ -181,6 +237,7 @@ bool make_buffer(Buffer &b, VkDeviceSize size, VkBufferUsageFlags usage, const v
+@@ -181,6 +242,7 @@ bool make_buffer(Buffer &b, VkDeviceSize size, VkBufferUsageFlags usage, const v
  }
  
  void destroy(Buffer &b) {
@@ -1835,7 +1840,7 @@ index abb386c..1bf0ae4 100644
      if (b.buf) vkDestroyBuffer(g_dev, b.buf, nullptr);
      if (b.mem) vkFreeMemory(g_dev, b.mem, nullptr);
      b = {};
-@@ -214,6 +271,12 @@ bool make_image(Image &im, uint32_t w, uint32_t h, VkFormat fmt, VkImageUsageFla
+@@ -214,6 +276,12 @@ bool make_image(Image &im, uint32_t w, uint32_t h, VkFormat fmt, VkImageUsageFla
      VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
      ai.allocationSize = req.size;
      ai.memoryTypeIndex = mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -1848,7 +1853,7 @@ index abb386c..1bf0ae4 100644
      VKC(vkAllocateMemory(g_dev, &ai, nullptr, &im.mem));
      VKC(vkBindImageMemory(g_dev, im.img, im.mem, 0));
      VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-@@ -230,6 +293,7 @@ bool make_image(Image &im, uint32_t w, uint32_t h, VkFormat fmt, VkImageUsageFla
+@@ -230,6 +298,7 @@ bool make_image(Image &im, uint32_t w, uint32_t h, VkFormat fmt, VkImageUsageFla
  }
  
  void destroy(Image &im) {
@@ -1856,7 +1861,7 @@ index abb386c..1bf0ae4 100644
      if (im.view) vkDestroyImageView(g_dev, im.view, nullptr);
      if (im.att_view) vkDestroyImageView(g_dev, im.att_view, nullptr);
      if (im.img) vkDestroyImage(g_dev, im.img, nullptr);
-@@ -239,6 +303,7 @@ void destroy(Image &im) {
+@@ -239,6 +308,7 @@ void destroy(Image &im) {
  
  void barrier(Image &im, VkImageLayout to) {
      if (im.layout == to) return;
@@ -1864,7 +1869,7 @@ index abb386c..1bf0ae4 100644
      VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
      b.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
      b.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-@@ -252,6 +317,33 @@ void barrier(Image &im, VkImageLayout to) {
+@@ -252,6 +322,33 @@ void barrier(Image &im, VkImageLayout to) {
      im.layout = to;
  }
  
@@ -1898,7 +1903,7 @@ index abb386c..1bf0ae4 100644
  // Dois quadros em voo: cada vaga tem command buffer, fence, pool de descritores, metade do anel de
  // upload e um par de timestamps. A CPU grava uma vaga enquanto a GPU executa a outra.
  constexpr uint32_t kSlots = 2;
-@@ -271,7 +363,93 @@ constexpr uint32_t kTexSets = 4096;
+@@ -271,7 +368,93 @@ constexpr uint32_t kTexSets = 4096;
  std::unordered_map<uint64_t, VkDescriptorSet> g_tex_sets;
  bool g_tex_sets_stale = false;
  
@@ -1992,7 +1997,7 @@ index abb386c..1bf0ae4 100644
      VKC(vkResetCommandBuffer(g_cmd, 0));
      VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
      bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-@@ -280,10 +458,14 @@ bool begin_cmd() {
+@@ -280,10 +463,14 @@ bool begin_cmd() {
          vkCmdResetQueryPool(g_cmd, g_qpool, 2 * g_fi, 2);
          vkCmdWriteTimestamp(g_cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, g_qpool, 2 * g_fi);
      }
@@ -2007,7 +2012,7 @@ index abb386c..1bf0ae4 100644
      VKC(vkEndCommandBuffer(g_cmd));
      VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
      si.commandBufferCount = 1;
-@@ -303,6 +485,15 @@ struct Target {
+@@ -303,6 +490,15 @@ struct Target {
      bool le_a_si = false;        // algum desenho já leu este alvo enquanto desenhava nele: copiar no começo da cena
  };
  std::map<uint32_t, Target> g_targets;
@@ -2023,7 +2028,7 @@ index abb386c..1bf0ae4 100644
  
  // ------------------------------------------------------------- quadro em gravação
  bool g_recording = false;
-@@ -320,26 +511,226 @@ std::unordered_map<uint64_t, uint64_t> g_tex_used; // textura -> último quadro
+@@ -320,26 +516,226 @@ std::unordered_map<uint64_t, uint64_t> g_tex_used; // textura -> último quadro
  uint64_t g_frame_no = 0;                            // quadros de gravação (frame_begin) desde o início
  std::vector<float> g_debug_vs; // cópias de alvos lidas como textura: vivem até o fim do quadro
  
@@ -2253,7 +2258,7 @@ index abb386c..1bf0ae4 100644
      g_pend[i] = false;
      return true;
  }
-@@ -383,6 +774,7 @@ bool frame_begin() {
+@@ -383,6 +779,7 @@ bool frame_begin() {
      g_ring_off = 0;
      g_draws_in_frame = 0;
      VKC(vkResetDescriptorPool(g_dev, g_dpool, 0));
@@ -2261,7 +2266,7 @@ index abb386c..1bf0ae4 100644
      {
          // Conjuntos de uniforms da vaga: o anel inteiro, deslocamento dinâmico por desenho.
          VkDescriptorSetLayout ls[3] = {g_dsl[0], g_dsl[2], g_dsl[4]};
-@@ -421,6 +813,7 @@ bool frame_begin() {
+@@ -421,6 +818,7 @@ bool frame_begin() {
  bool frame_flush(bool wait) {
      if (g_recording) {
          end_pass();
@@ -2269,7 +2274,7 @@ index abb386c..1bf0ae4 100644
          if (g_qpool) vkCmdWriteTimestamp(g_cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_qpool, 2 * g_fi + 1);
          g_tsopen[g_fi] = g_qpool != VK_NULL_HANDLE;
          VKC(vkEndCommandBuffer(g_cmd));
-@@ -459,6 +852,18 @@ VkDeviceSize ring_put(const void *data, VkDeviceSize n, VkDeviceSize align) {
+@@ -459,6 +857,18 @@ VkDeviceSize ring_put(const void *data, VkDeviceSize n, VkDeviceSize align) {
      return at;
  }
  
@@ -2288,7 +2293,7 @@ index abb386c..1bf0ae4 100644
  bool get_target(uint32_t addr, uint32_t w, uint32_t h, Target *&out) {
      auto it = g_targets.find(addr);
      if (it != g_targets.end()) {
-@@ -467,13 +872,12 @@ bool get_target(uint32_t addr, uint32_t w, uint32_t h, Target *&out) {
+@@ -467,13 +877,12 @@ bool get_target(uint32_t addr, uint32_t w, uint32_t h, Target *&out) {
      }
      Target t;
      t.gw = w, t.gh = h;
@@ -2305,7 +2310,7 @@ index abb386c..1bf0ae4 100644
          return false;
      VkImageView views[2] = {t.color.view, t.depth.att_view};
      VkFramebufferCreateInfo fi{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-@@ -488,15 +892,10 @@ bool get_target(uint32_t addr, uint32_t w, uint32_t h, Target *&out) {
+@@ -488,15 +897,10 @@ bool get_target(uint32_t addr, uint32_t w, uint32_t h, Target *&out) {
      if (!frame_begin()) return false;
      end_pass();
      barrier(t.color, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -2322,7 +2327,7 @@ index abb386c..1bf0ae4 100644
      out = &(g_targets[addr] = t);
      return true;
  }
-@@ -524,13 +923,115 @@ Image g_white;
+@@ -524,13 +928,115 @@ Image g_white;
  // pegava também o que a cena já tinha pintado: o efeito de debaixo d'água, o do Amuleto das Moiras e o do submundo
  // do GoW2 limpam o alvo com uma cor e depois distorcem a cena por cima -> tela toda azul ou preta.
  uint64_t ver_proprio(const Target &t) { return 1ull << 63 | t.cena; }
@@ -2439,7 +2444,7 @@ index abb386c..1bf0ae4 100644
      const VkImageLayout back = depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
      barrier(src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
      barrier(snap, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-@@ -540,6 +1041,7 @@ bool copiar_snap(Snap &sn, Image &src, bool depth, uint64_t ver) {
+@@ -540,6 +1046,7 @@ bool copiar_snap(Snap &sn, Image &src, bool depth, uint64_t ver) {
      vkCmdCopyImage(g_cmd, src.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, snap.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
      barrier(src, back);
      barrier(snap, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -2447,7 +2452,7 @@ index abb386c..1bf0ae4 100644
      g_stats.snapshots++;
      return true;
  }
-@@ -584,6 +1086,7 @@ VkSampler sampler_for(const Texture &t) {
+@@ -584,6 +1091,7 @@ VkSampler sampler_for(const Texture &t) {
  // Grava o envio no quadro atual (o chamador já reservou os bytes no anel).
  // Barreira de um único nível (geração de mipmaps).
  void level_barrier(Image &im, uint32_t level, VkImageLayout from, VkImageLayout to) {
@@ -2455,7 +2460,7 @@ index abb386c..1bf0ae4 100644
      VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
      b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
      b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-@@ -602,6 +1105,7 @@ uint32_t mip_levels(uint32_t w, uint32_t h) {
+@@ -602,6 +1110,7 @@ uint32_t mip_levels(uint32_t w, uint32_t h) {
  }
  
  bool upload_texture(Image &im, uint32_t w, uint32_t h, const uint8_t *rgba, bool mipmapped = false) {
@@ -2463,7 +2468,7 @@ index abb386c..1bf0ae4 100644
      const uint32_t mips = mipmapped ? mip_levels(w, h) : 1;
      if (!make_image(im, w, h, kColor,
                      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, mips))
-@@ -768,8 +1272,11 @@ VkPipeline pipeline(const Draw &d, VkShaderModule vs, VkShaderModule fs) {
+@@ -768,8 +1277,11 @@ VkPipeline pipeline(const Draw &d, VkShaderModule vs, VkShaderModule fs) {
      for (const VertexAttr &a : d.raw_attrs)
          layout = (layout ^ (a.location | a.stream << 5 | a.offset << 10 | a.fmt << 20 | a.comps << 25)) * 1099511628211ull;
      auto key = std::make_tuple(vs, fs, layout, blend, depth, d.cull, sten);
@@ -2476,7 +2481,7 @@ index abb386c..1bf0ae4 100644
      Timer tm(g_stats.pipe_ns);
      g_stats.pipes++;
  
-@@ -896,6 +1403,11 @@ bool is_borderless() { return win::borderless(); }
+@@ -896,6 +1408,11 @@ bool is_borderless() { return win::borderless(); }
  
  
  // Swapchain do tamanho atual da janela (recriada ao redimensionar, entrar/sair da tela cheia, restaurar).
@@ -2488,7 +2493,7 @@ index abb386c..1bf0ae4 100644
  static bool create_swapchain() {
      VkSurfaceCapabilitiesKHR caps;
      vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_phys, g_surface, &caps);
-@@ -907,10 +1419,20 @@ static bool create_swapchain() {
+@@ -907,10 +1424,20 @@ static bool create_swapchain() {
      for (auto &f : fmts)
          if (f.format == VK_FORMAT_B8G8R8A8_UNORM) fmt = f;
      g_swap_extent = caps.currentExtent.width != UINT32_MAX ? caps.currentExtent : VkExtent2D{1440, 816};
@@ -2510,7 +2515,7 @@ index abb386c..1bf0ae4 100644
      if (caps.maxImageCount && ci.minImageCount > caps.maxImageCount) ci.minImageCount = caps.maxImageCount;
      ci.imageFormat = fmt.format;
      ci.imageColorSpace = fmt.colorSpace;
-@@ -946,11 +1468,14 @@ static bool create_swapchain() {
+@@ -946,11 +1473,14 @@ static bool create_swapchain() {
      ci.oldSwapchain = g_swap;
      VkSwapchainKHR sw = VK_NULL_HANDLE;
      VKC(vkCreateSwapchainKHR(g_dev, &ci, nullptr, &sw));
@@ -2525,7 +2530,7 @@ index abb386c..1bf0ae4 100644
      vkGetSwapchainImagesKHR(g_dev, g_swap, &ni, g_swap_images.data());
      VkSemaphoreCreateInfo rsi{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
      while (g_rendered_img.size() < ni) { // os que já existem continuam (recriar a swapchain vem depois de um WaitIdle)
-@@ -967,11 +1492,19 @@ static bool create_window() {
+@@ -967,11 +1497,19 @@ static bool create_window() {
          g_err = "CreateWindowEx falhou";
          return false;
      }
@@ -2545,7 +2550,7 @@ index abb386c..1bf0ae4 100644
      VkBool32 ok = VK_FALSE;
      vkGetPhysicalDeviceSurfaceSupportKHR(g_phys, g_qfam, g_surface, &ok);
      if (!ok) {
-@@ -1049,6 +1582,17 @@ bool is_depth(uint32_t addr) {
+@@ -1049,6 +1587,17 @@ bool is_depth(uint32_t addr) {
      return g_depth_owner.count(addr) != 0;
  }
  
@@ -2563,7 +2568,7 @@ index abb386c..1bf0ae4 100644
  void post_save_depth(uint32_t addr, Image &dep); // iluminação de tela (mais abaixo)
  
  void begin_scene(uint32_t color_addr, uint8_t stencil) {
-@@ -1058,11 +1602,7 @@ void begin_scene(uint32_t color_addr, uint8_t stencil) {
+@@ -1058,11 +1607,7 @@ void begin_scene(uint32_t color_addr, uint8_t stencil) {
      end_pass();
      Image &dep = it->second.depth;
      post_save_depth(color_addr, dep);
@@ -2576,7 +2581,7 @@ index abb386c..1bf0ae4 100644
      it->second.dver++;
      it->second.cena++;
      if (it->second.le_a_si) copiar_snap(g_snaps[{color_addr, 2}], it->second.color, false, ver_proprio(it->second));
-@@ -1076,6 +1616,7 @@ void draw_enemy_bars(uint32_t color_addr, const EnemyBar *bars, uint32_t n) {
+@@ -1076,6 +1621,7 @@ void draw_enemy_bars(uint32_t color_addr, const EnemyBar *bars, uint32_t n) {
      std::lock_guard<std::recursive_mutex> lock(g_lock);
      auto it = g_targets.find(color_addr);
      if (!g_dev || !n || it == g_targets.end()) return;
@@ -2584,7 +2589,7 @@ index abb386c..1bf0ae4 100644
      Image &im = it->second.color;
      if (!frame_reserve(n * ((VkDeviceSize)im.h * im.h / 64 * 4 + 64 * 1024))) return;
      end_pass();
-@@ -1137,6 +1678,244 @@ static void overlay_fps(VkImage img, int32_t x0, int32_t y0) {
+@@ -1137,6 +1683,244 @@ static void overlay_fps(VkImage img, int32_t x0, int32_t y0) {
      vkCmdCopyBufferToImage(g_pcmd, g_ovl.buf, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
  }
  
@@ -2829,7 +2834,7 @@ index abb386c..1bf0ae4 100644
  void post_at_present(uint32_t addr); // iluminação de tela (mais abaixo)
  // Cena remasterizada (video_hd.cpp): imagem do próximo present no lugar do alvo do jogo.
  static const uint8_t *g_vid_px = nullptr;
-@@ -1144,16 +1923,137 @@ static uint32_t g_vid_w = 0, g_vid_h = 0;
+@@ -1144,16 +1928,137 @@ static uint32_t g_vid_w = 0, g_vid_h = 0;
  static Image g_vid_img;
  static Buffer g_vid_buf;
  void set_video_frame(const uint8_t *rgba, uint32_t w, uint32_t h) { g_vid_px = rgba, g_vid_w = w, g_vid_h = h; }
@@ -2969,7 +2974,7 @@ index abb386c..1bf0ae4 100644
      if (!g_swap) return false;
      win::pump();
      auto it = g_targets.find(addr);
-@@ -1163,32 +2063,66 @@ bool present(uint32_t addr) {
+@@ -1163,32 +2068,66 @@ bool present(uint32_t addr) {
          if (!create_swapchain()) return false;
      }
      if (!g_swap_extent.width || !g_swap_extent.height) return true; // minimizada
@@ -3041,7 +3046,7 @@ index abb386c..1bf0ae4 100644
          }
          void *map = nullptr;
          if (ok && vkMapMemory(g_dev, g_vid_buf.mem, 0, bytes, 0, &map) == VK_SUCCESS) {
-@@ -1203,11 +2137,25 @@ bool present(uint32_t addr) {
+@@ -1203,11 +2142,25 @@ bool present(uint32_t addr) {
          }
          g_vid_px = nullptr;
      }
@@ -3068,7 +3073,7 @@ index abb386c..1bf0ae4 100644
      barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
      // Proporção do jogo preservada: a imagem ocupa o maior retângulo centrado; o resto fica preto.
      const VkClearColorValue black{};
-@@ -1222,21 +2170,23 @@ bool present(uint32_t addr) {
+@@ -1222,21 +2175,38 @@ bool present(uint32_t addr) {
          mb.subresourceRange = all;
          vkCmdPipelineBarrier(g_pcmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &mb);
      }
@@ -3076,14 +3081,29 @@ index abb386c..1bf0ae4 100644
 -    int32_t dw = (int32_t)sw, dh = (int32_t)(sw / sa + 0.5);
 -    if (dh > (int32_t)sh) dh = (int32_t)sh, dw = (int32_t)(sh * sa + 0.5);
 -    const int32_t dx = ((int32_t)sw - dw) / 2, dy = ((int32_t)sh - dh) / 2;
++    // Borda sem desenho: o meio pixel do viewport é somado em pixels do guest e depois escalado, então com escala s > 1
++    // as primeiras ceil(0,5*s - 0,5) colunas/linhas de todo alvo nunca são cobertas (nem pelo clear do jogo) e mostram
++    // lixo da memória (a linha na borda esquerda/superior). A apresentação começa a ler depois delas.
++    int32_t ex = 0, ey = 0;
++    if (srcp != &g_vid_img && src.img && it != g_targets.end()) {
++        const float hp = vk_halfpix();
++        const float sx = it->second.gw ? (float)src.w / (float)it->second.gw : scale_now();
++        const float sy = it->second.gh ? (float)src.h / (float)it->second.gh : scale_now();
++        ex = (int32_t)std::ceil(hp * sx - 0.5f - 1e-3f), ey = (int32_t)std::ceil(hp * sy - 0.5f - 1e-3f);
++        ex = ex < 0 ? 0 : (ex > 4 ? 4 : ex), ey = ey < 0 ? 0 : (ey > 4 ? 4 : ey);
++    }
      VkImageBlit b{};
      b.srcSubresource = b.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
++    b.srcOffsets[0] = {ex, ey, 0};
      b.srcOffsets[1] = {(int32_t)src.w, (int32_t)src.h, 1};
      b.dstOffsets[0] = {dx, dy, 0};
      b.dstOffsets[1] = {dx + dw, dy + dh, 1};
 -    vkCmdBlitImage(g_pcmd, src.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b,
 -                   VK_FILTER_LINEAR);
-+    if (fsr) {
++    if (fsr) { // o FSR espalha a borda ruim mais 1 px
++        if (ex) ex++;
++        if (ey) ey++;
++        b.srcOffsets[0] = {ex, ey, 0};
 +        b.srcOffsets[1] = {dw, dh, 1};
 +        vkCmdBlitImage(g_pcmd, fsr->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b,
 +                       VK_FILTER_NEAREST);
@@ -3099,7 +3119,7 @@ index abb386c..1bf0ae4 100644
      barrier(dst, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
      g_cur = g_cmd;
      VKC(vkEndCommandBuffer(g_pcmd));
-@@ -1261,6 +2211,12 @@ bool present(uint32_t addr) {
+@@ -1261,6 +2231,12 @@ bool present(uint32_t addr) {
      const VkResult pr = vkQueuePresentKHR(g_queue, &pi);
      if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR) win::mark_resized();
      win::presented();
@@ -3112,7 +3132,7 @@ index abb386c..1bf0ae4 100644
      static uint32_t presents = 0;
      if (++presents % 300 == 0) save_pcache();
      return true;
-@@ -1277,14 +2233,34 @@ bool init(bool validation, bool window) {
+@@ -1277,14 +2253,34 @@ bool init(bool validation, bool window) {
          ici.enabledLayerCount = 1;
          ici.ppEnabledLayerNames = &layer;
      }
@@ -3147,7 +3167,7 @@ index abb386c..1bf0ae4 100644
      std::vector<VkPhysicalDevice> devs(n);
      vkEnumeratePhysicalDevices(g_inst, &n, devs.data());
      if (!n) {
-@@ -1324,10 +2300,15 @@ bool init(bool validation, bool window) {
+@@ -1324,10 +2320,15 @@ bool init(bool validation, bool window) {
          VkPhysicalDeviceProperties pp;
          vkGetPhysicalDeviceProperties(g_phys, &pp);
          const char *e = getenv("VITART_VK_ANISO");
@@ -3163,7 +3183,7 @@ index abb386c..1bf0ae4 100644
          }
      }
      dci.pEnabledFeatures = &feats;
-@@ -1361,6 +2342,10 @@ bool init(bool validation, bool window) {
+@@ -1361,6 +2362,10 @@ bool init(bool validation, bool window) {
      dci.enabledExtensionCount = (uint32_t)dexts.size();
      dci.ppEnabledExtensionNames = dexts.empty() ? nullptr : dexts.data();
      VKC(vkCreateDevice(g_phys, &dci, nullptr, &g_dev));
@@ -3174,7 +3194,7 @@ index abb386c..1bf0ae4 100644
      vkGetDeviceQueue(g_dev, g_qfam, 0, &g_queue);
      VkCommandPoolCreateInfo pci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
      pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-@@ -1373,11 +2358,13 @@ bool init(bool validation, bool window) {
+@@ -1373,11 +2378,13 @@ bool init(bool validation, bool window) {
      for (auto &cb : g_cmds) VKC(vkAllocateCommandBuffers(g_dev, &cai, &cb));
      VKC(vkAllocateCommandBuffers(g_dev, &cai, &g_pcmd));
      g_cur = g_cmd;
@@ -3188,7 +3208,7 @@ index abb386c..1bf0ae4 100644
      {
          VkPhysicalDeviceProperties pp;
          vkGetPhysicalDeviceProperties(g_phys, &pp);
-@@ -1387,6 +2374,8 @@ bool init(bool validation, bool window) {
+@@ -1387,6 +2394,8 @@ bool init(bool validation, bool window) {
          qi.queryCount = 2 * kSlots;
          if (pp.limits.timestampComputeAndGraphics && vkCreateQueryPool(g_dev, &qi, nullptr, &g_qpool) != VK_SUCCESS)
              g_qpool = VK_NULL_HANDLE;
@@ -3197,7 +3217,7 @@ index abb386c..1bf0ae4 100644
      }
  
      // Passo de render único (cor + profundidade, carregando o conteúdo): serve a todos os alvos.
-@@ -1416,6 +2405,9 @@ bool init(bool validation, bool window) {
+@@ -1416,6 +2425,9 @@ bool init(bool validation, bool window) {
      rci.subpassCount = 1;
      rci.pSubpasses = &sp;
      VKC(vkCreateRenderPass(g_dev, &rci, nullptr, &g_rp));
@@ -3207,7 +3227,7 @@ index abb386c..1bf0ae4 100644
  
      // Layout: set 0 = uniforms do vértice (0) e memória do vldst (1); set 1 = texturas do fragmento;
      // set 2 = uniforms e memória do fragmento.
-@@ -1508,12 +2500,14 @@ bool init(bool validation, bool window) {
+@@ -1508,12 +2520,14 @@ bool init(bool validation, bool window) {
          VKC(vkCreateDescriptorPool(g_dev, &tpi, nullptr, &g_tex_pool));
          select_slot(0);
      }
@@ -3222,7 +3242,7 @@ index abb386c..1bf0ae4 100644
      return frame_flush(true);
  }
  
-@@ -1629,6 +2623,7 @@ bool post_init() {
+@@ -1629,6 +2643,7 @@ bool post_init() {
  }
  
  bool post_resources(uint32_t w, uint32_t h) {
@@ -3230,7 +3250,7 @@ index abb386c..1bf0ae4 100644
      if (g_post.w == w && g_post.h == h) return true;
      vkDeviceWaitIdle(g_dev); // as imagens antigas podem estar em uso no outro quadro em voo
      for (Image *im : {&g_post.col, &g_post.dep, &g_post.a, &g_post.b, &g_post.c, &g_post.d, &g_post.focus}) destroy(*im);
-@@ -1652,6 +2647,7 @@ bool post_resources(uint32_t w, uint32_t h) {
+@@ -1652,6 +2667,7 @@ bool post_resources(uint32_t w, uint32_t h) {
  }
  
  void compute_barrier() {
@@ -3238,7 +3258,7 @@ index abb386c..1bf0ae4 100644
      VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
      mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
      mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-@@ -1660,6 +2656,7 @@ void compute_barrier() {
+@@ -1660,6 +2676,7 @@ void compute_barrier() {
  }
  
  void post_save_depth(uint32_t addr, Image &dep) {
@@ -3246,7 +3266,7 @@ index abb386c..1bf0ae4 100644
      if (addr != g_main_addr) return;
      g_dbg_begin++;
      const uint32_t n = g_scene3d;
-@@ -1667,6 +2664,7 @@ void post_save_depth(uint32_t addr, Image &dep) {
+@@ -1667,6 +2684,7 @@ void post_save_depth(uint32_t addr, Image &dep) {
      if (!n || n <= g_dep_best || !g_post_s2v_ok) return;
      end_pass();
      if (!post_resources(dep.w, dep.h)) return;
@@ -3254,7 +3274,7 @@ index abb386c..1bf0ae4 100644
      barrier(dep, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
      barrier(g_post.dep, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
      VkImageCopy c{};
-@@ -1676,6 +2674,7 @@ void post_save_depth(uint32_t addr, Image &dep) {
+@@ -1676,6 +2694,7 @@ void post_save_depth(uint32_t addr, Image &dep) {
                     1, &c);
      barrier(dep, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
      barrier(g_post.dep, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -3262,7 +3282,7 @@ index abb386c..1bf0ae4 100644
      std::memcpy(g_post_s2v_dep, g_post_s2v, sizeof g_post_s2v);
      g_dep_best = n, g_post_dep_ok = true;
      g_dbg_saves++;
-@@ -1708,6 +2707,7 @@ bool invert4x4(const float *m, float *inv) {
+@@ -1708,6 +2727,7 @@ bool invert4x4(const float *m, float *inv) {
  // Aplica o pós-processamento no alvo (gravado no quadro atual). Marca o quadro como feito mesmo se não
  // houver o que fazer, para não tentar de novo.
  void run_post(Target &t) {
@@ -3270,7 +3290,7 @@ index abb386c..1bf0ae4 100644
      g_post_done = true;
      const vt::pbr::Config &cfg = vt::pbr::config();
      static const bool env_off = getenv("VITART_POST") && *getenv("VITART_POST") == '0';
-@@ -1957,7 +2957,10 @@ bool draw(const Draw &d) {
+@@ -1957,7 +2977,10 @@ bool draw(const Draw &d) {
          vbytes = (VkDeviceSize)na * d.vertex_count * 16;
      VkDeviceSize need = vbytes + (VkDeviceSize)d.index_count * (d.index_data ? d.index_size : 4) + 8 + d.vert_uniforms_size +
                          d.frag_uniforms_size + 64 * 1024;
@@ -3282,7 +3302,7 @@ index abb386c..1bf0ae4 100644
      for (size_t i = 0; i < d.textures.size(); i++) {
          const Texture &t = d.textures[i];
          if (t.target_addr || !t.rgba) continue;
-@@ -2000,6 +3003,21 @@ bool draw(const Draw &d) {
+@@ -2000,6 +3023,21 @@ bool draw(const Draw &d) {
              const bool proprio = !t.depth && it->first == d.target_addr;
              Image &src = t.depth ? it->second.depth : it->second.color;
              const uint64_t ver = proprio ? ver_proprio(it->second) : t.depth ? it->second.dver : it->second.cver;
@@ -3304,7 +3324,7 @@ index abb386c..1bf0ae4 100644
              Snap &sn = g_snaps[{owner, proprio ? 2 : t.depth ? 1 : 0}];
              Image &snap = sn.im;
              if (snap.img && sn.ver == ver) {
-@@ -2081,14 +3099,17 @@ bool draw(const Draw &d) {
+@@ -2081,14 +3119,17 @@ bool draw(const Draw &d) {
      if (d.depth_write) tgt->dver++;
  
      VkDeviceSize voff[16];
@@ -3326,7 +3346,7 @@ index abb386c..1bf0ae4 100644
      const VkDeviceSize vurange = d.debug_vs ? (dbgoff + (VkDeviceSize)d.vertex_count * 16 - vuoff)
                                              : (d.vert_uniforms_size ? d.vert_uniforms_size : 16);
      const VkDeviceSize furange = d.frag_uniforms_size ? d.frag_uniforms_size : 16;
-@@ -2125,16 +3146,24 @@ bool draw(const Draw &d) {
+@@ -2125,30 +3166,39 @@ bool draw(const Draw &d) {
      const uint32_t dyn[4] = {(uint32_t)vuoff, (uint32_t)vuoff, (uint32_t)fuoff, (uint32_t)fuoff};
  
      if (g_open != tgt) {
@@ -3359,7 +3379,11 @@ index abb386c..1bf0ae4 100644
      // Viewport do GXM: tela = deslocamento + escala * ndc. No Vulkan, x = desl - escala, largura = 2 * escala
      // (altura negativa inverte y, como a escala negativa do GXM).
      VkViewport vp{d.vps[0] - d.vps[1], d.vps[2] - d.vps[3], 2 * d.vps[1], 2 * d.vps[3], d.vps[4], d.vps[4] + d.vps[5]};
-@@ -2145,10 +3174,11 @@ bool draw(const Draw &d) {
+     // O jogo conta com o centro do pixel em coordenada inteira (como o D3D9); no Vulkan ele fica em +0,5.
+     // Sem compensar, toda passada de tela cheia lê entre texels: o quadro borra e a máscara de névoa
+     // vaza 1 px além dos personagens (o contorno escuro). Medido no replay: +0,5 deixa nítido e sem halo.
+-    static const float halfpix = getenv("VITART_VK_HALFPIX") ? (float)std::atof(getenv("VITART_VK_HALFPIX")) : 0.5f;
++    const float halfpix = vk_halfpix();
      // escala do guest para o host, por eixo: no ultrawide o alvo de tela é mais largo que a escala
      const float rs = (float)scale_now();
      const float rsx = tgt->gw ? (float)tgt->color.w / (float)tgt->gw : rs;
@@ -3373,7 +3397,7 @@ index abb386c..1bf0ae4 100644
      if (d.view_inv_ok && d.target_addr == g_main_addr && (d.depth_func != 7 || d.depth_write)) {
          vt::pbr::screen_to_view(d.view_inv, vp.x, vp.y, vp.width, vp.height, vp.minDepth, vp.maxDepth, g_post_s2v);
          g_post_s2v_ok = true;
-@@ -2158,29 +3188,38 @@ bool draw(const Draw &d) {
+@@ -2158,29 +3208,38 @@ bool draw(const Draw &d) {
          std::memcpy(g_post_sun_col, d.pbr_params + 20, 12);
          g_post_sun_ok = true;
      }
@@ -3428,7 +3452,7 @@ index abb386c..1bf0ae4 100644
      if (d.debug_vs) {
          if (!frame_flush(true)) return false;
          g_debug_vs.assign(reinterpret_cast<const float *>(g_ring_ptr + dbgoff),
-@@ -2199,6 +3238,7 @@ Stats peek_stats() {
+@@ -2199,6 +3258,7 @@ Stats peek_stats() {
  Stats take_stats() {
      std::lock_guard<std::recursive_mutex> lock(g_lock);
      Stats s = g_stats;
@@ -3436,7 +3460,7 @@ index abb386c..1bf0ae4 100644
      g_stats = {};
      return s;
  }
-@@ -2243,13 +3283,14 @@ bool read_target(uint32_t addr, std::vector<uint8_t> &rgba, uint32_t &w, uint32_
+@@ -2243,13 +3303,14 @@ bool read_target(uint32_t addr, std::vector<uint8_t> &rgba, uint32_t &w, uint32_
  // Troca a resolução interna com o jogo rodando: cada alvo é recriado na escala nova e recebe a imagem
  // atual reduzida/ampliada com filtro (a tela de pausa não pisca); a profundidade volta limpa, as cópias
  // amostráveis e os conjuntos de textura que apontavam para as imagens velhas são refeitos sob demanda.
@@ -3456,7 +3480,7 @@ index abb386c..1bf0ae4 100644
      if (!g_dev || g_targets.empty()) {
          g_scale_override = s;
          return true;
-@@ -2258,6 +3299,7 @@ bool set_render_scale(uint32_t s) {
+@@ -2258,6 +3319,7 @@ bool set_render_scale(uint32_t s) {
      g_scale_override = s;
      return true;
  }
@@ -3464,7 +3488,7 @@ index abb386c..1bf0ae4 100644
  float aspect_widen() { return g_widen; }
  bool set_aspect_widen(float w) {
      std::lock_guard<std::recursive_mutex> lock(g_lock);
-@@ -2272,7 +3314,8 @@ bool set_aspect_widen(float w) {
+@@ -2272,7 +3334,8 @@ bool set_aspect_widen(float w) {
      return true;
  }
  // Os alvos de novo no tamanho da escala s e da largura widen: o conteúdo atual reduzido/ampliado com filtro.
@@ -3474,7 +3498,7 @@ index abb386c..1bf0ae4 100644
      if (!frame_flush(true)) return false;
      vkDeviceWaitIdle(g_dev);
      if (!begin_cmd()) return false;
-@@ -2280,13 +3323,12 @@ bool refazer_alvos(uint32_t s, float widen) {
+@@ -2280,13 +3343,12 @@ bool refazer_alvos(uint32_t s, float widen) {
      std::vector<VkFramebuffer> old_fb;
      for (auto &kv : g_targets) {
          Target &t = kv.second;
@@ -3491,7 +3515,7 @@ index abb386c..1bf0ae4 100644
              return false;
          VkImageView views[2] = {n.color.view, n.depth.att_view};
          VkFramebufferCreateInfo fi{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-@@ -2303,12 +3345,7 @@ bool refazer_alvos(uint32_t s, float widen) {
+@@ -2303,12 +3365,7 @@ bool refazer_alvos(uint32_t s, float widen) {
          b.dstOffsets[1] = {(int32_t)w, (int32_t)h, 1};
          vkCmdBlitImage(g_cmd, t.color.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, n.color.img,
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b, VK_FILTER_LINEAR);
@@ -3505,7 +3529,7 @@ index abb386c..1bf0ae4 100644
          n.cver = t.cver + 1, n.dver = t.dver + 1, n.gw = t.gw, n.gh = t.gh, n.cena = t.cena, n.le_a_si = t.le_a_si;
          old.push_back(t.color), old.push_back(t.depth), old_fb.push_back(t.fb);
          t = n;
-@@ -2358,9 +3395,11 @@ void shutdown() {
+@@ -2358,9 +3415,11 @@ void shutdown() {
      vkDestroyPipelineLayout(g_dev, g_layout, nullptr);
      for (auto l : g_dsl) vkDestroyDescriptorSetLayout(g_dev, l, nullptr);
      vkDestroyRenderPass(g_dev, g_rp, nullptr);
@@ -4363,7 +4387,7 @@ index b73b0bb..662c044 100644
      // Região de notificações (palavras que a GPU escreve ao terminar): memória do guest zerada.
      static const uint32_t region = new_object(0x1000, "gxm:notification-region");
 diff --git a/runtime/vitart/hle_io.cpp b/runtime/vitart/hle_io.cpp
-index d247c5d..db6a021 100644
+index d247c5d..a17edb7 100644
 --- a/runtime/vitart/hle_io.cpp
 +++ b/runtime/vitart/hle_io.cpp
 @@ -9,6 +9,7 @@
@@ -4374,7 +4398,25 @@ index d247c5d..db6a021 100644
  #include <chrono>
  #include <cstdarg>
  #include <cstdio>
-@@ -550,7 +551,7 @@ int64_t video_bink_frame() {
+@@ -288,6 +289,9 @@ static std::vector<uint8_t> build_toc(const PsarcPatch &pt, const std::vector<st
+         if (mf.mod == "*" || std::find(on.begin(), on.end(), mf.mod) != on.end()) point_entry(toc, mf);
+     return toc;
+ }
++// algum .psarc.vtpatch foi aplicado (o mod do menu de pausa, que traz o contador de FPS no HUD dos GoW)
++static std::atomic<bool> g_psarc_mods{false};
++bool psarc_mods_loaded() { return g_psarc_mods.load(std::memory_order_relaxed); }
+ static std::shared_ptr<PsarcPatch> psarc_patch(const std::string &hp) {
+     if (hp.size() < 6 || _stricmp(hp.c_str() + hp.size() - 6, ".psarc") != 0) return nullptr;
+     static const bool off = getenv("VITART_NO_MODS") != nullptr;
+@@ -318,6 +322,7 @@ static std::shared_ptr<PsarcPatch> psarc_patch(const std::string &hp) {
+             pt = std::make_shared<PsarcPatch>();
+         } else {
+             have = true;
++            g_psarc_mods = true;
+             logf("vitart: mods em %s: TOC remendada, %u bytes de arquivos trocados", name.c_str(), el);
+         }
+     }
+@@ -550,7 +555,7 @@ int64_t video_bink_frame() {
          g_hbink_async = 0;
      }
      if (now_ms() - g_video_read_ms > 500 || g_hbink_busy.exchange(true)) return -1;
@@ -4383,7 +4425,7 @@ index d247c5d..db6a021 100644
          const auto t0 = std::chrono::steady_clock::now();
          const uint32_t a = hbink_find(w, h, frames);
          static int logged = 0;
-@@ -560,7 +561,7 @@ int64_t video_bink_frame() {
+@@ -560,7 +565,7 @@ int64_t video_bink_frame() {
          if (a) g_hbink_async = a, g_hbink_async_gen = gen;
          std::this_thread::sleep_for(std::chrono::milliseconds(a ? 0 : 200));
          g_hbink_busy = false;
@@ -4392,7 +4434,7 @@ index d247c5d..db6a021 100644
      return -1;
  }
  
-@@ -700,9 +701,23 @@ VT_HLE(sceIoClose) {
+@@ -700,9 +705,23 @@ VT_HLE(sceIoClose) {
      g_files.erase(it);
      ret(ctx, 0);
  }
@@ -4416,7 +4458,7 @@ index d247c5d..db6a021 100644
      HANDLE h = reinterpret_cast<HANDLE>(_get_osfhandle(fd));
      OVERLAPPED ov{};
      ov.Offset = (DWORD)off;
-@@ -714,6 +729,7 @@ static int pio(int fd, uint32_t buf, uint32_t n, int64_t off, bool write) {
+@@ -714,6 +733,7 @@ static int pio(int fd, uint32_t buf, uint32_t n, int64_t off, bool write) {
          return -1;
      }
      return (int)done;

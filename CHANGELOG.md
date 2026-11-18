@@ -2,6 +2,23 @@
 
 **Português** · [English](CHANGELOG.en.md)
 
+## v1.3-nx
+
+Correções e launcher novo. Obrigado a **[mvhoang92](https://github.com/mvhoang92)** pelos testes no console e pelo
+diagnóstico de cada problema (#5, #6, #7).
+
+- **Linha na borda esquerda/superior corrigida** (#6): com escala acima de 1x (Vita 960x544, 720p, 2x...) o meio pixel
+  do viewport deixava a primeira coluna e a primeira linha de todo alvo sem desenho, com lixo da memória. A
+  apresentação agora começa a ler depois delas (calculado a cada quadro pela escala).
+- **Contador de FPS sem o mod de menu** (#7): sem o `.vtpatch` do menu de pausa, o item *FPS counter* do R + Plus usa
+  o contador do vitart; com o mod, continua o do HUD.
+- **Shaders do God of War II** (#5): o [BUILDING.md](docs/BUILDING.md) explica como completar o `shaders.pak` jogando
+  (`shaders/miss` → `usse_build_cache.py` → `pack_shaders.py`). Um pack completo para os dois jogos tem ~9.700
+  programas.
+- **Launcher**: menu **Opções gráficas** (resolução interna, taxa de quadros, VSync, proporção, contador de FPS,
+  texturas HD, barras de vida), gravadas em `data/vitart_options.ini` e válidas para os dois jogos; a versão
+  mostrada agora vem do build (antes ficava sempre "v1.0").
+
 ## v1.2-nx
 
 Foco: **mais FPS em 720p no relógio padrão** (CPU 1020 MHz, GPU 307 MHz, sem overclock).

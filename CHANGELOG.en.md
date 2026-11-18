@@ -2,6 +2,22 @@
 
 [Português](CHANGELOG.md) · **English**
 
+## v1.3-nx
+
+Fixes and a new launcher. Thanks to **[mvhoang92](https://github.com/mvhoang92)** for the console testing and the
+diagnosis of each issue (#5, #6, #7).
+
+- **Left/top edge line fixed** (#6): at scales above 1x (Vita 960x544, 720p, 2x...) the viewport half-pixel offset
+  left the first column and row of every render target undrawn, showing stale memory. Presentation now starts reading
+  after them (computed every frame from the scale).
+- **FPS counter without the menu mod** (#7): without the pause-menu `.vtpatch`, the R + Plus *FPS counter* uses
+  vitart's counter; with the mod, the HUD counter is still used.
+- **God of War II shaders** (#5): [BUILDING.md](docs/BUILDING.md) explains how to complete `shaders.pak` by playing
+  (`shaders/miss` → `usse_build_cache.py` → `pack_shaders.py`). A complete pack for both games has ~9,700 programs.
+- **Launcher**: new **Graphics options** menu (internal resolution, frame rate, VSync, aspect ratio, FPS counter, HD
+  textures, enemy health bars), saved to `data/vitart_options.ini` for both games; the version shown now comes from
+  the build (it always said "v1.0").
+
 ## v1.2-nx
 
 Focus: **more FPS at 720p on stock clocks** (CPU 1020 MHz, GPU 307 MHz, no overclock).
