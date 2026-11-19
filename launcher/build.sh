@@ -1,6 +1,7 @@
 #!/bin/bash
 # build/gow-nx.nro: launcher com capa, música, menu de opções/idiomas, atualizador (GitHub Releases) e encadeamento via envSetNextLoad.
-# A capa (bg.bgra, 1280x720 BGRA) e a música (music.mp3) NÃO vêm no repositório: use em launcher/romfs/ ou na pasta do launcher no SD
+# A capa (bg.bgra, 1280x720 BGRA) e a música (music.mp3) padrão ficam em launcher/romfs/ (versionadas, embutidas pelo CI);
+# também podem ser substituídas pela pasta do launcher no SD
 # (tools/make_launcher_assets.ps1 gera o bg.bgra a partir de uma imagem). Sem elas o launcher abre com fundo preto e mudo.
 # Precisa dos portlibs switch-freetype e switch-mpg123 (e switch-curl para habilitar o atualizador).
 set -e

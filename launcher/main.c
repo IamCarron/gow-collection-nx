@@ -392,6 +392,29 @@ static char self_nro[FS_MAX_PATH] = "sdmc:/switch/gow-nx/gow-nx.nro";
 static int romfs_ativo = 0;
 
 static int existe(const char *p) { struct stat st; return stat(p, &st) == 0; }
+
+// Copia um arquivo do romfs:/ para a pasta do launcher no SD (se ainda não existir lá).
+// Usado antes de uma atualização, para a capa/música sobreviverem a um .nro sem esses arquivos embutidos.
+static void salvar_asset_no_sd(const char *nome) {
+    char src[64], dst[FS_MAX_PATH], tmp[FS_MAX_PATH + 8];
+    snprintf(src, sizeof src, "romfs:/%s", nome);
+    snprintf(dst, sizeof dst, "%.700s%s", dir, nome);
+    if (existe(dst) || !existe(src)) return;
+    snprintf(tmp, sizeof tmp, "%s.tmp", dst);
+    FILE *in = fopen(src, "rb");
+    if (!in) return;
+    FILE *out = fopen(tmp, "wb");
+    if (!out) { fclose(in); return; }
+    static char buf[64 * 1024];
+    size_t n; int ok = 1;
+    while ((n = fread(buf, 1, sizeof buf, in)) > 0)
+        if (fwrite(buf, 1, n, out) != n) { ok = 0; break; }
+    if (ferror(in)) ok = 0;
+    fclose(in);
+    if (fclose(out) != 0) ok = 0;
+    if (ok) ok = rename(tmp, dst) == 0;
+    if (!ok) remove(tmp);
+}
 static void caminho(char *out, size_t n, int i) { snprintf(out, n, "%.700s%s", dir, jogos[i].arquivo); }
 static void atualizar_jogos(void) {
     for (int i = 0; i < N; i++) {
@@ -1022,7 +1045,11 @@ int main(int argc, char **argv) {
                 if (k & HidNpadButton_A) {
                     // Solta romfs:/ antes de substituir o próprio gow-nx.nro no cartão SD.
                     musica_parar();
-                    if (romfs_ativo) { romfsExit(); romfs_ativo = 0; }
+                    if (romfs_ativo) {
+                        salvar_asset_no_sd("bg.bgra");
+                        salvar_asset_no_sd("music.mp3");
+                        romfsExit(); romfs_ativo = 0;
+                    }
                     upd_start_install(dir, self_nro);
                 } else if (k & (HidNpadButton_B | HidNpadButton_Plus)) {
                     upd_cancel(1);
