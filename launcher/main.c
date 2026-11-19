@@ -490,6 +490,7 @@ static int romfs_ativo = 0;
 
 static int existe(const char *p) { struct stat st; return stat(p, &st) == 0; }
 
+#ifdef ENABLE_UPDATER
 // Copia um arquivo do romfs:/ para a pasta do launcher no SD (se ainda não existir lá).
 // Usado antes de uma atualização, para a capa/música sobreviverem a um .nro sem esses arquivos embutidos.
 static void salvar_asset_no_sd(const char *nome) {
@@ -512,6 +513,7 @@ static void salvar_asset_no_sd(const char *nome) {
     if (ok) ok = rename(tmp, dst) == 0;
     if (!ok) remove(tmp);
 }
+#endif
 static void caminho(char *out, size_t n, int i) { snprintf(out, n, "%.700s%s", dir, jogos[i].arquivo); }
 static void atualizar_jogos(void) {
     for (int i = 0; i < N; i++) {
