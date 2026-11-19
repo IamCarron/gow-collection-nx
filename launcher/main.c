@@ -11,6 +11,9 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <mpg123.h>
+#ifdef ENABLE_UPDATER
+#include "updater.h"
+#endif
 
 #define W 1280
 #define H 720
@@ -42,6 +45,27 @@ typedef struct {
     const char *btn_sair;
     const char *btn_mudar;
     const char *btn_salvar;
+    const char *upd_menu;
+    const char *upd_titulo;
+    const char *upd_ver_atual;
+    const char *upd_ver_nova;
+    const char *upd_buscando;
+    const char *upd_atualizado;
+    const char *upd_disponivel;
+    const char *upd_baixando;
+    const char *upd_extraindo;
+    const char *upd_pronto;
+    const char *upd_err_net;
+    const char *upd_err_http;
+    const char *upd_err_asset;
+    const char *upd_err_disk;
+    const char *upd_err_zip;
+    const char *upd_err_cancel;
+    const char *btn_instalar;
+    const char *btn_reinstalar;
+    const char *btn_reiniciar;
+    const char *btn_cancelar;
+    const char *btn_voltar;
 } Textos;
 
 static const Textos kTextos[NLANG] = {
@@ -70,6 +94,27 @@ static const Textos kTextos[NLANG] = {
         .btn_sair = " Exit",
         .btn_mudar = " Change",
         .btn_salvar = " Save and back",
+        .upd_menu = "Check for updates",
+        .upd_titulo = "UPDATER",
+        .upd_ver_atual = "Installed version: v%s",
+        .upd_ver_nova = "Latest release: %s",
+        .upd_buscando = "Checking GitHub for updates...",
+        .upd_atualizado = "Already up to date.",
+        .upd_disponivel = "New version available! Saves and game files are kept.",
+        .upd_baixando = "Downloading update...",
+        .upd_extraindo = "Installing update...",
+        .upd_pronto = "Update installed! Press A to restart the launcher.",
+        .upd_err_net = "Connection error. Check your Wi-Fi connection.",
+        .upd_err_http = "GitHub returned HTTP error %ld.",
+        .upd_err_asset = "No downloadable package was found in the latest release.",
+        .upd_err_disk = "Could not write update files to the SD card.",
+        .upd_err_zip = "Downloaded update package is invalid or corrupted.",
+        .upd_err_cancel = "Update cancelled.",
+        .btn_instalar = " Install",
+        .btn_reinstalar = " Reinstall",
+        .btn_reiniciar = " Restart",
+        .btn_cancelar = " Cancel",
+        .btn_voltar = " Back",
     },
     [LANG_ES] = {
         .nome_idioma = "Español",
@@ -96,6 +141,27 @@ static const Textos kTextos[NLANG] = {
         .btn_sair = " Salir",
         .btn_mudar = " Cambiar",
         .btn_salvar = " Guardar y volver",
+        .upd_menu = "Buscar actualizaciones",
+        .upd_titulo = "ACTUALIZADOR",
+        .upd_ver_atual = "Versión instalada: v%s",
+        .upd_ver_nova = "Última versión: %s",
+        .upd_buscando = "Buscando actualizaciones en GitHub...",
+        .upd_atualizado = "Ya tienes la última versión.",
+        .upd_disponivel = "¡Nueva versión disponible! Partidas y archivos del juego se conservan.",
+        .upd_baixando = "Descargando actualización...",
+        .upd_extraindo = "Instalando actualización...",
+        .upd_pronto = "¡Actualización instalada! Pulsa A para reiniciar el launcher.",
+        .upd_err_net = "Error de conexión. Comprueba tu Wi-Fi.",
+        .upd_err_http = "GitHub devolvió error HTTP %ld.",
+        .upd_err_asset = "No se encontró ningún paquete descargable en el release.",
+        .upd_err_disk = "No se pudieron escribir los archivos en la tarjeta SD.",
+        .upd_err_zip = "El paquete descargado es inválido o está dañado.",
+        .upd_err_cancel = "Actualización cancelada.",
+        .btn_instalar = " Instalar",
+        .btn_reinstalar = " Reinstalar",
+        .btn_reiniciar = " Reiniciar",
+        .btn_cancelar = " Cancelar",
+        .btn_voltar = " Volver",
     },
     [LANG_PT] = {
         .nome_idioma = "Português (BR)",
@@ -122,6 +188,27 @@ static const Textos kTextos[NLANG] = {
         .btn_sair = " Sair",
         .btn_mudar = " Mudar",
         .btn_salvar = " Salvar e voltar",
+        .upd_menu = "Buscar atualizações",
+        .upd_titulo = "ATUALIZADOR",
+        .upd_ver_atual = "Versão instalada: v%s",
+        .upd_ver_nova = "Última versão: %s",
+        .upd_buscando = "Verificando atualizações no GitHub...",
+        .upd_atualizado = "Já está na versão mais recente.",
+        .upd_disponivel = "Nova versão disponível! Saves e arquivos do jogo são preservados.",
+        .upd_baixando = "Baixando atualização...",
+        .upd_extraindo = "Instalando atualização...",
+        .upd_pronto = "Atualização instalada! Aperte A para reiniciar o launcher.",
+        .upd_err_net = "Erro de conexão. Verifique seu Wi-Fi.",
+        .upd_err_http = "GitHub retornou erro HTTP %ld.",
+        .upd_err_asset = "Nenhum pacote baixável foi encontrado no release.",
+        .upd_err_disk = "Não foi possível gravar a atualização no cartão SD.",
+        .upd_err_zip = "O pacote baixado é inválido ou está corrompido.",
+        .upd_err_cancel = "Atualização cancelada.",
+        .btn_instalar = " Instalar",
+        .btn_reinstalar = " Reinstalar",
+        .btn_reiniciar = " Reiniciar",
+        .btn_cancelar = " Cancelar",
+        .btn_voltar = " Voltar",
     },
     [LANG_FR] = {
         .nome_idioma = "Français",
@@ -148,6 +235,27 @@ static const Textos kTextos[NLANG] = {
         .btn_sair = " Quitter",
         .btn_mudar = " Changer",
         .btn_salvar = " Enregistrer et retour",
+        .upd_menu = "Rechercher des mises à jour",
+        .upd_titulo = "MISE À JOUR",
+        .upd_ver_atual = "Version installée : v%s",
+        .upd_ver_nova = "Dernière version : %s",
+        .upd_buscando = "Recherche de mises à jour sur GitHub...",
+        .upd_atualizado = "Déjà à jour.",
+        .upd_disponivel = "Nouvelle version disponible ! Sauvegardes et fichiers du jeu conservés.",
+        .upd_baixando = "Téléchargement de la mise à jour...",
+        .upd_extraindo = "Installation de la mise à jour...",
+        .upd_pronto = "Mise à jour installée ! Appuyez sur A pour relancer le lanceur.",
+        .upd_err_net = "Erreur de connexion. Vérifiez votre Wi-Fi.",
+        .upd_err_http = "GitHub a renvoyé l'erreur HTTP %ld.",
+        .upd_err_asset = "Aucun paquet téléchargeable trouvé dans la release.",
+        .upd_err_disk = "Impossible d'écrire la mise à jour sur la carte SD.",
+        .upd_err_zip = "Le paquet téléchargé est invalide ou corrompu.",
+        .upd_err_cancel = "Mise à jour annulée.",
+        .btn_instalar = " Installer",
+        .btn_reinstalar = " Réinstaller",
+        .btn_reiniciar = " Redémarrer",
+        .btn_cancelar = " Annuler",
+        .btn_voltar = " Retour",
     },
     [LANG_IT] = {
         .nome_idioma = "Italiano",
@@ -174,6 +282,27 @@ static const Textos kTextos[NLANG] = {
         .btn_sair = " Esci",
         .btn_mudar = " Cambia",
         .btn_salvar = " Salva e torna",
+        .upd_menu = "Cerca aggiornamenti",
+        .upd_titulo = "AGGIORNAMENTO",
+        .upd_ver_atual = "Versione installata: v%s",
+        .upd_ver_nova = "Ultima versione: %s",
+        .upd_buscando = "Ricerca aggiornamenti su GitHub...",
+        .upd_atualizado = "Già aggiornato.",
+        .upd_disponivel = "Nuova versione disponibile! Salvataggi e file di gioco preservati.",
+        .upd_baixando = "Download aggiornamento...",
+        .upd_extraindo = "Installazione aggiornamento...",
+        .upd_pronto = "Aggiornamento installato! Premi A per riavviare il launcher.",
+        .upd_err_net = "Errore di connessione. Controlla il Wi-Fi.",
+        .upd_err_http = "GitHub ha restituito l'errore HTTP %ld.",
+        .upd_err_asset = "Nessun pacchetto scaricabile trovato nella release.",
+        .upd_err_disk = "Impossibile scrivere l'aggiornamento sulla scheda SD.",
+        .upd_err_zip = "Il pacchetto scaricato non è valido o è danneggiato.",
+        .upd_err_cancel = "Aggiornamento annullato.",
+        .btn_instalar = " Installa",
+        .btn_reinstalar = " Reinstalla",
+        .btn_reiniciar = " Riavvia",
+        .btn_cancelar = " Annulla",
+        .btn_voltar = " Indietro",
     },
     [LANG_DE] = {
         .nome_idioma = "Deutsch",
@@ -200,6 +329,27 @@ static const Textos kTextos[NLANG] = {
         .btn_sair = " Beenden",
         .btn_mudar = " Ändern",
         .btn_salvar = " Speichern & zurück",
+        .upd_menu = "Nach Updates suchen",
+        .upd_titulo = "UPDATER",
+        .upd_ver_atual = "Installierte Version: v%s",
+        .upd_ver_nova = "Neueste Version: %s",
+        .upd_buscando = "Suche nach Updates auf GitHub...",
+        .upd_atualizado = "Bereits aktuell.",
+        .upd_disponivel = "Neue Version verfügbar! Spielstände und Spieldateien bleiben erhalten.",
+        .upd_baixando = "Update wird heruntergeladen...",
+        .upd_extraindo = "Update wird installiert...",
+        .upd_pronto = "Update installiert! Drücke A zum Neustarten des Launchers.",
+        .upd_err_net = "Verbindungsfehler. Prüfe deine WLAN-Verbindung.",
+        .upd_err_http = "GitHub hat HTTP-Fehler %ld gemeldet.",
+        .upd_err_asset = "Kein herunterladbares Paket im Release gefunden.",
+        .upd_err_disk = "Update-Dateien konnten nicht auf die SD-Karte geschrieben werden.",
+        .upd_err_zip = "Das heruntergeladene Update-Paket ist ungültig oder beschädigt.",
+        .upd_err_cancel = "Update abgebrochen.",
+        .btn_instalar = " Installieren",
+        .btn_reinstalar = " Neu installieren",
+        .btn_reiniciar = " Neustarten",
+        .btn_cancelar = " Abbrechen",
+        .btn_voltar = " Zurück",
     },
 };
 
@@ -230,9 +380,16 @@ static const Jogo jogos[] = {
     { "God of War II", "gow2.nro" },
 };
 #define N (int)(sizeof jogos / sizeof jogos[0])
+#ifdef ENABLE_UPDATER
+#define NMENU (N + 2)
+#else
+#define NMENU (N + 1)
+#endif
 static int jogo_ok[N];
 
 static char dir[FS_MAX_PATH] = "sdmc:/switch/gow-nx/";
+static char self_nro[FS_MAX_PATH] = "sdmc:/switch/gow-nx/gow-nx.nro";
+static int romfs_ativo = 0;
 
 static int existe(const char *p) { struct stat st; return stat(p, &st) == 0; }
 static void caminho(char *out, size_t n, int i) { snprintf(out, n, "%.700s%s", dir, jogos[i].arquivo); }
@@ -399,7 +556,9 @@ static int opcoes_gravar(void) {
     const char *vc = idioma_codigo_vitart(idioma_atual());
     if (vc[0]) fprintf(o, "language=%s\n", vc);
     for (int i = 1; i < NOP; i++) fprintf(o, "%s%s\n", opcoes[i].chave, opcoes[i].val[opcoes[i].atual]);
-    fclose(o);
+    int ok = !ferror(o);
+    if (fclose(o) != 0) ok = 0;
+    if (!ok) { remove(np); return 0; }
     remove(p);
     return rename(np, p) == 0;
 }
@@ -412,13 +571,23 @@ static Thread a_thr;
 static volatile int a_parar = 0, a_ok = 0;
 static void *a_mem[NBUF];
 static AudioOutBuffer a_buf[NBUF];
+static char musica_arq[FS_MAX_PATH];
+
+static int resolver_musica(char *out, size_t n) {
+    if (romfs_ativo && existe("romfs:/music.mp3")) {
+        snprintf(out, n, "romfs:/music.mp3");
+        return 1;
+    }
+    snprintf(out, n, "%.700smusic.mp3", dir);
+    return existe(out);
+}
 
 static void musica(void *arg) {
     (void)arg;
     mpg123_handle *mh = mpg123_new(NULL, NULL);
     if (!mh) return;
     mpg123_param(mh, MPG123_FLAGS, MPG123_FORCE_STEREO | MPG123_QUIET, 0);
-    if (mpg123_open(mh, "romfs:/music.mp3") != MPG123_OK) { mpg123_delete(mh); return; }
+    if (mpg123_open(mh, musica_arq) != MPG123_OK) { mpg123_delete(mh); return; }
     long rate = 44100; int ch, enc;
     mpg123_getformat(mh, &rate, &ch, &enc);
     mpg123_format_none(mh);
@@ -466,12 +635,21 @@ static void musica(void *arg) {
 }
 
 static void musica_iniciar(void) {
-    if (!existe("romfs:/music.mp3")) return;
+    if (a_ok) return;
+    if (!resolver_musica(musica_arq, sizeof musica_arq)) return;
     if (R_FAILED(audoutInitialize())) return;
     if (R_FAILED(audoutStartAudioOut())) { audoutExit(); return; }
     mpg123_init();
+    a_parar = 0;
+    for (int i = 0; i < NBUF; i++) a_mem[i] = NULL;
     for (int i = 0; i < NBUF; i++) {
-        a_mem[i] = aligned_alloc(0x1000, ABYTES); memset(a_mem[i], 0, ABYTES);
+        a_mem[i] = aligned_alloc(0x1000, ABYTES);
+        if (!a_mem[i]) {
+            audoutStopAudioOut(); audoutExit(); mpg123_exit();
+            for (int j = 0; j < i; j++) { free(a_mem[j]); a_mem[j] = NULL; }
+            return;
+        }
+        memset(a_mem[i], 0, ABYTES);
         a_buf[i].next = NULL; a_buf[i].buffer = a_mem[i]; a_buf[i].buffer_size = ABYTES;
         a_buf[i].data_size = AFRAMES * 4; a_buf[i].data_offset = 0;
     }
@@ -488,7 +666,7 @@ static void musica_parar(void) {                 // fade-out curto e libera o á
     a_parar = 1;
     threadWaitForExit(&a_thr); threadClose(&a_thr);
     audoutStopAudioOut(); audoutExit(); mpg123_exit();
-    for (int i = 0; i < NBUF; i++) free(a_mem[i]);
+    for (int i = 0; i < NBUF; i++) { free(a_mem[i]); a_mem[i] = NULL; }
     a_ok = 0;
 }
 
@@ -572,14 +750,14 @@ static void desenhar_opcoes(int sel, int msg, u64 tick) {
     for (int i = 0; i < NOP; i++) {
         int y = 228 + i * 44, s = i == sel;
         if (s) {
-            for (int x = 96; x < 860; x++) retangulo(x, y - 30, 1, 40, OURO_ESC, 80 * (860 - x) / 764);
+            for (int x = 96; x < 900; x++) retangulo(x, y - 30, 1, 40, OURO_ESC, 80 * (900 - x) / 804);
             retangulo(90, y - 30, 5, 40, OURO, 150 + (int)(105 * pulso));
         }
         texto_sombra(116, y, 24, s ? OURO : CINZA, s ? 255 : 210, t->op_nomes[i]);
         char raw[80], v[96];
         opcao_valor_texto(i, raw, sizeof raw);
         snprintf(v, sizeof v, s ? "<  %s  >" : "%s", raw);
-        texto_sombra(490, y, 24, s ? BRANCO : CINZA, s ? 255 : 200, v);
+        texto_sombra(520, y, 24, s ? BRANCO : CINZA, s ? 255 : 200, v);
     }
     texto_sombra(116, 228 + NOP * 44 + 8, 18, CINZA, 200, t->nota_opcoes);
     const char *ms = msg_texto(msg);
@@ -591,6 +769,128 @@ static void desenhar_opcoes(int sel, int msg, u64 tick) {
     texto_sombra(x + 4, yb, 22, BRANCO, 230, t->btn_salvar);
     assinatura(yb);
 }
+
+#ifdef ENABLE_UPDATER
+static void barra_progresso(int x, int y, int w, int h, float frac, int indet, u64 tick) {
+    retangulo(x, y, w, h, 0x000000, 170);
+    retangulo(x, y, w, 2, OURO_ESC, 220);
+    retangulo(x, y + h - 2, w, 2, OURO_ESC, 220);
+    retangulo(x, y, 2, h, OURO_ESC, 220);
+    retangulo(x + w - 2, y, 2, h, OURO_ESC, 220);
+    int iw = w - 6, ih = h - 6;
+    if (indet) {
+        int bw = iw / 4;
+        int ox = (int)((tick * 6) % (u64)(iw + bw)) - bw;
+        int x0 = ox < 0 ? 0 : ox;
+        int x1 = ox + bw > iw ? iw : ox + bw;
+        if (x1 > x0) retangulo(x + 3 + x0, y + 3, x1 - x0, ih, OURO, 230);
+    } else {
+        if (frac < 0.f) frac = 0.f;
+        if (frac > 1.f) frac = 1.f;
+        int fw = (int)(iw * frac + 0.5f);
+        if (fw > 0) retangulo(x + 3, y + 3, fw, ih, OURO, 235);
+    }
+}
+
+static void desenhar_atualizador(const UpdStatus *st, u64 tick) {
+    const Textos *t = txt();
+    if (bg) { for (int y = 0; y < H; y++) memcpy(&px[y * pitch], &bg[y * W], W * 4); }
+    else { for (int y = 0; y < H; y++) memset(&px[y * pitch], 0, W * 4); }
+
+    texto_sombra(110, 174, 26, CINZA, 255, t->upd_titulo);
+    retangulo(110, 188, 300, 2, OURO_ESC, 200);
+    texto_sombra(110, 224, 18, CINZA, 195, "GitHub: " UPDATE_REPO);
+
+    char linha[256];
+    snprintf(linha, sizeof linha, t->upd_ver_atual, VERSAO);
+    texto_sombra(110, 272, 24, BRANCO, 240, linha);
+    if (st->latest_tag[0]) {
+        snprintf(linha, sizeof linha, t->upd_ver_nova, st->latest_tag);
+        texto_sombra(110, 312, 24, OURO, 255, linha);
+    }
+
+    if (st->state == UPD_CHECKING) {
+        texto_sombra(110, 374, 24, BRANCO, 240, t->upd_buscando);
+        barra_progresso(110, 412, 680, 22, 0.f, 1, tick);
+    } else if (st->state == UPD_UP_TO_DATE) {
+        texto_sombra(110, 374, 24, OURO, 255, t->upd_atualizado);
+        if (st->asset_name[0]) {
+            if (st->asset_size > 0)
+                snprintf(linha, sizeof linha, "%s (%.1f MB)", st->asset_name, (double)st->asset_size / (1024.0 * 1024.0));
+            else
+                snprintf(linha, sizeof linha, "%s", st->asset_name);
+            texto_sombra(110, 416, 20, CINZA, 210, linha);
+        }
+    } else if (st->state == UPD_AVAILABLE) {
+        texto_sombra(110, 374, 24, OURO, 255, t->upd_disponivel);
+        if (st->asset_name[0]) {
+            if (st->asset_size > 0)
+                snprintf(linha, sizeof linha, "%s (%.1f MB)", st->asset_name, (double)st->asset_size / (1024.0 * 1024.0));
+            else
+                snprintf(linha, sizeof linha, "%s", st->asset_name);
+            texto_sombra(110, 416, 20, BRANCO, 220, linha);
+        }
+    } else if (st->state == UPD_DOWNLOADING) {
+        texto_sombra(110, 374, 24, BRANCO, 245, t->upd_baixando);
+        float frac = st->dl_total > 0 ? (float)((double)st->dl_now / (double)st->dl_total) : 0.f;
+        barra_progresso(110, 412, 680, 24, frac, st->dl_total == 0, tick);
+        if (st->dl_total > 0) {
+            int pct = (int)(frac * 100.f + 0.5f);
+            if (pct > 100) pct = 100;
+            snprintf(linha, sizeof linha, "%d%%  (%.1f / %.1f MB)", pct,
+                     (double)st->dl_now / (1024.0 * 1024.0), (double)st->dl_total / (1024.0 * 1024.0));
+        } else {
+            snprintf(linha, sizeof linha, "%.1f MB", (double)st->dl_now / (1024.0 * 1024.0));
+        }
+        texto_sombra(110, 470, 20, CINZA, 230, linha);
+    } else if (st->state == UPD_EXTRACTING) {
+        texto_sombra(110, 374, 24, BRANCO, 245, t->upd_extraindo);
+        float frac = st->files_total > 0 ? (float)st->files_done / (float)st->files_total : 0.f;
+        barra_progresso(110, 412, 680, 24, frac, st->files_total <= 0, tick);
+        if (st->files_total > 0)
+            snprintf(linha, sizeof linha, "%d / %d  %s", st->files_done, st->files_total, st->current_file);
+        else
+            snprintf(linha, sizeof linha, "%s", st->current_file);
+        texto_sombra(110, 470, 20, CINZA, 230, linha);
+    } else if (st->state == UPD_DONE) {
+        texto_sombra(110, 374, 24, OURO, 255, t->upd_pronto);
+        barra_progresso(110, 412, 680, 24, 1.f, 0, tick);
+    } else if (st->state == UPD_ERROR) {
+        const char *em = t->upd_err_net;
+        if (st->err == UPD_ERR_HTTP) { snprintf(linha, sizeof linha, t->upd_err_http, st->http_code); em = linha; }
+        else if (st->err == UPD_ERR_NO_ASSET) em = t->upd_err_asset;
+        else if (st->err == UPD_ERR_DISK) em = t->upd_err_disk;
+        else if (st->err == UPD_ERR_ZIP) em = t->upd_err_zip;
+        else if (st->err == UPD_ERR_CANCELLED) em = t->upd_err_cancel;
+        texto_sombra(110, 374, 24, VERMELHO, 255, em);
+    }
+
+    int x = 110, yb = 676;
+    if (st->state == UPD_AVAILABLE) {
+        x += texto_sombra(x, yb, 28, BRANCO, 255, "\xEE\x83\xA0");
+        x += texto_sombra(x + 4, yb, 22, BRANCO, 230, t->btn_instalar) + 44;
+        x += texto_sombra(x, yb, 28, BRANCO, 255, "\xEE\x83\xA1");
+        texto_sombra(x + 4, yb, 22, BRANCO, 230, t->btn_voltar);
+    } else if (st->state == UPD_UP_TO_DATE) {
+        if (st->asset_url[0]) {
+            x += texto_sombra(x, yb, 28, BRANCO, 255, "\xEE\x83\xA0");
+            x += texto_sombra(x + 4, yb, 22, BRANCO, 230, t->btn_reinstalar) + 44;
+        }
+        x += texto_sombra(x, yb, 28, BRANCO, 255, "\xEE\x83\xA1");
+        texto_sombra(x + 4, yb, 22, BRANCO, 230, t->btn_voltar);
+    } else if (st->state == UPD_DONE) {
+        x += texto_sombra(x, yb, 28, BRANCO, 255, "\xEE\x83\xA0");
+        texto_sombra(x + 4, yb, 22, BRANCO, 230, t->btn_reiniciar);
+    } else if (st->state == UPD_CHECKING || st->state == UPD_DOWNLOADING || st->state == UPD_EXTRACTING) {
+        x += texto_sombra(x, yb, 28, BRANCO, 255, "\xEE\x83\xA1");
+        texto_sombra(x + 4, yb, 22, BRANCO, 230, t->btn_cancelar);
+    } else {
+        x += texto_sombra(x, yb, 28, BRANCO, 255, "\xEE\x83\xA1");
+        texto_sombra(x + 4, yb, 22, BRANCO, 230, t->btn_voltar);
+    }
+    assinatura(yb);
+}
+#endif
 
 static void desenhar(int sel, int msg, u64 tick) {
     const Textos *t = txt();
@@ -609,6 +909,16 @@ static void desenhar(int sel, int msg, u64 tick) {
         }
         texto_sombra(120, y, s ? 30 : 26, s ? OURO : CINZA, s ? 255 : 200, t->opcoes_menu);
     }
+#ifdef ENABLE_UPDATER
+    {   // item do atualizador, abaixo de Opções
+        int y = 340 + N * 110 + 34, s = sel == N + 1;
+        if (s) {
+            for (int x = 96; x < 560; x++) retangulo(x, y - 34, 1, 48, OURO_ESC, 80 * (560 - x) / 464);
+            retangulo(90, y - 34, 5, 48, OURO, 150 + (int)(105 * pulso));
+        }
+        texto_sombra(120, y, s ? 30 : 26, s ? OURO : CINZA, s ? 255 : 200, t->upd_menu);
+    }
+#endif
 
     for (int i = 0; i < N; i++) {
         int y = 340 + i * 110;
@@ -627,7 +937,7 @@ static void desenhar(int sel, int msg, u64 tick) {
 
     int x = 110, yb = 676;
     x += texto_sombra(x, yb, 28, BRANCO, 255, "\xEE\x83\xA0");   // U+E0E0 botão A
-    x += texto_sombra(x + 4, yb, 22, BRANCO, 230, sel == N ? t->btn_abrir : t->btn_jogar) + 44;
+    x += texto_sombra(x + 4, yb, 22, BRANCO, 230, sel >= N ? t->btn_abrir : t->btn_jogar) + 44;
     x += texto_sombra(x, yb, 28, BRANCO, 255, "\xEE\x83\xAF");   // U+E0EF botão +
     texto_sombra(x + 4, yb, 22, BRANCO, 230, t->btn_sair);
 
@@ -637,7 +947,11 @@ static void desenhar(int sel, int msg, u64 tick) {
 static void carregar_capa(void) {
     bg = malloc(W * H * 4);
     if (!bg) return;
-    FILE *f = fopen("romfs:/bg.bgra", "rb");
+    FILE *f = romfs_ativo ? fopen("romfs:/bg.bgra", "rb") : NULL;
+    if (!f) {
+        char p[FS_MAX_PATH]; snprintf(p, sizeof p, "%.700sbg.bgra", dir);
+        f = fopen(p, "rb");
+    }
     size_t n = 0;
     if (f) { n = fread(bg, 4, W * H, f); fclose(f); }
     if (n != W * H) memset(bg, 0, W * H * 4);
@@ -654,11 +968,12 @@ int main(int argc, char **argv) {
     // Pasta do launcher (onde também ficam gow1.nro / gow2.nro), tirada do argv[0].
     if (argc > 0 && argv[0] && strchr(argv[0], '/')) {
         const char *a = argv[0];
-        if (strncmp(a, "sdmc:", 5) != 0 && a[0] == '/') snprintf(dir, sizeof dir, "sdmc:%.700s", a);
-        else snprintf(dir, sizeof dir, "%.700s", a);
+        if (strncmp(a, "sdmc:", 5) != 0 && a[0] == '/') snprintf(self_nro, sizeof self_nro, "sdmc:%.700s", a);
+        else snprintf(self_nro, sizeof self_nro, "%.700s", a);
+        snprintf(dir, sizeof dir, "%s", self_nro);
         char *b = strrchr(dir, '/'); if (b) b[1] = 0;
     }
-    romfsInit();
+    if (R_SUCCEEDED(romfsInit())) romfs_ativo = 1;
     carregar_capa();
 
     plInitialize(PlServiceType_User);
@@ -682,11 +997,58 @@ int main(int argc, char **argv) {
     opcoes_ler();
     atualizar_jogos();
     int sel = ler_ultimo(), lancar = 0, tela_op = 0, sel_op = 0;
+#ifdef ENABLE_UPDATER
+    int tela_upd = 0;
+#endif
     int msg = msg_inicial();
     u64 tick = 0;
     while (appletMainLoop()) {
         padUpdate(&pad);
         u64 k = padGetButtonsDown(&pad);
+#ifdef ENABLE_UPDATER
+        if (tela_upd) {
+            UpdStatus st;
+            upd_get_status(&st);
+            if (st.state == UPD_DONE) {
+                if (k & (HidNpadButton_A | HidNpadButton_B | HidNpadButton_Plus)) {
+                    upd_shutdown();
+                    if (envHasNextLoad()) {
+                        char args[FS_MAX_PATH + 4]; snprintf(args, sizeof args, "\"%.760s\"", self_nro);
+                        envSetNextLoad(self_nro, args);
+                    }
+                    lancar = 1;
+                }
+            } else if (st.state == UPD_AVAILABLE || (st.state == UPD_UP_TO_DATE && st.asset_url[0])) {
+                if (k & HidNpadButton_A) {
+                    // Solta romfs:/ antes de substituir o próprio gow-nx.nro no cartão SD.
+                    musica_parar();
+                    if (romfs_ativo) { romfsExit(); romfs_ativo = 0; }
+                    upd_start_install(dir, self_nro);
+                } else if (k & (HidNpadButton_B | HidNpadButton_Plus)) {
+                    upd_cancel(1);
+                    tela_upd = 0;
+                    msg = msg_inicial();
+                }
+            } else if (st.state == UPD_CHECKING || st.state == UPD_DOWNLOADING || st.state == UPD_EXTRACTING) {
+                if (k & HidNpadButton_B) upd_cancel(0);
+            } else {
+                if (k & (HidNpadButton_B | HidNpadButton_Plus)) {
+                    upd_cancel(1);
+                    tela_upd = 0;
+                    atualizar_jogos();
+                    if (!romfs_ativo && R_SUCCEEDED(romfsInit())) romfs_ativo = 1;
+                    musica_iniciar();
+                    msg = msg_inicial();
+                }
+            }
+            px = framebufferBegin(&fb, &pitch); pitch /= 4;
+            desenhar_atualizador(&st, tick++);
+            if (lancar) retangulo(0, 0, W, H, 0, 140);
+            framebufferEnd(&fb);
+            if (lancar) break;
+            continue;
+        }
+#endif
         if (tela_op) {
             Opcao *o = &opcoes[sel_op];
             if (k & HidNpadButton_AnyUp) sel_op = (sel_op + NOP - 1) % NOP;
@@ -703,9 +1065,16 @@ int main(int argc, char **argv) {
             continue;
         }
         if (k & HidNpadButton_Plus) break;
-        if (k & HidNpadButton_AnyUp) sel = (sel + N) % (N + 1);
-        if (k & HidNpadButton_AnyDown) sel = (sel + 1) % (N + 1);
+        if (k & HidNpadButton_AnyUp) sel = (sel + NMENU - 1) % NMENU;
+        if (k & HidNpadButton_AnyDown) sel = (sel + 1) % NMENU;
         if ((k & HidNpadButton_A) && sel == N) { tela_op = 1; msg = MSG_NONE; }
+#ifdef ENABLE_UPDATER
+        else if ((k & HidNpadButton_A) && sel == N + 1) {
+            tela_upd = 1;
+            msg = MSG_NONE;
+            upd_start_check(VERSAO);
+        }
+#endif
         else if (k & HidNpadButton_A) {
             char p[FS_MAX_PATH]; caminho(p, sizeof p, sel);
             jogo_ok[sel] = existe(p);
@@ -724,13 +1093,16 @@ int main(int argc, char **argv) {
         if (lancar) break;
     }
 
+#ifdef ENABLE_UPDATER
+    upd_shutdown();
+#endif
     musica_parar();
     framebufferClose(&fb);
     if (f_txt) FT_Done_Face(f_txt);
     if (f_ext) FT_Done_Face(f_ext);
     FT_Done_FreeType(ft);
     plExit();
-    romfsExit();
+    if (romfs_ativo) romfsExit();
     free(bg);
     return 0;
 }

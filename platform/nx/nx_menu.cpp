@@ -113,7 +113,8 @@ int load_lang() {
     if (std::FILE *f = std::fopen(ini.c_str(), "r")) {
         char line[256];
         while (std::fgets(line, sizeof line, f)) {
-            line[std::strcspn(line, "\r\n")] = 0;
+            size_t len = std::strlen(line);
+            while (len && (unsigned char)line[len - 1] <= 32) line[--len] = 0;
             if (!std::strncmp(line, "launcher_language=", 18)) {
                 const char *v = line + 18;
                 if (!std::strcmp(v, "auto")) from_launcher = kAuto;
