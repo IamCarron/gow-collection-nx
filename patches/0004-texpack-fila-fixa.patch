@@ -1,0 +1,84 @@
+diff --git a/runtime/vitart/hle_gxm.cpp b/runtime/vitart/hle_gxm.cpp
+index 662c044..b1c06fd 100644
+--- a/runtime/vitart/hle_gxm.cpp
++++ b/runtime/vitart/hle_gxm.cpp
+@@ -476,7 +476,11 @@ struct TexpackJob {
+ static std::unordered_map<uint64_t, std::shared_ptr<TexpackJob>> g_tp_jobs;
+ static std::mutex g_tp_sem_mutex;
+ static std::condition_variable g_tp_sem_cv;
+-static int g_tp_running = 0;
++// Fila de PNGs a decodificar e as threads fixas que a esvaziam. Uma thread por PNG (cada uma com 4 MB de pilha no
++// Switch) estourava a memória/limite de threads ao entrar numa área com centenas de texturas novas (ENOMEM).
++static std::deque<std::pair<std::shared_ptr<TexpackJob>, std::string>> g_tp_queue;
++static int g_tp_workers = 0;
++constexpr int kTpWorkers = 3;
+ // Versão de teclado/mouse (kKbmSalt) ou de Xbox (kXboxSalt) da textura (chave com sal), se houver; 0 = nenhuma.
+ static uint64_t texkbm_key(const gxmtex::Info &info, size_t base_bytes, uint64_t salt) {
+     texpack_load();
+@@ -578,16 +582,16 @@ static void texdump(const gxmtex::Info &info, size_t base_bytes, const std::vect
+         std::fclose(f);
+     }
+ }
+-static void texpack_start(uint64_t key) {
+-    if (g_tp_jobs.count(key)) return;
+-    auto job = std::make_shared<TexpackJob>();
+-    g_tp_jobs[key] = job;
+-    const std::string path = tp_path(key);
+-    vt::spawn_detached([job, path] {
++static void texpack_worker() {
++    for (;;) {
++        std::shared_ptr<TexpackJob> job;
++        std::string path;
+         {
+             std::unique_lock<std::mutex> l(g_tp_sem_mutex);
+-            g_tp_sem_cv.wait(l, [] { return g_tp_running < 3; });
+-            g_tp_running++;
++            g_tp_sem_cv.wait(l, [] { return !g_tp_queue.empty(); });
++            job = std::move(g_tp_queue.front().first);
++            path = std::move(g_tp_queue.front().second);
++            g_tp_queue.pop_front();
+         }
+         int x = 0, y = 0, c = 0;
+         if (stbi_uc *img = stbi_load(path.c_str(), &x, &y, &c, 4)) {
+@@ -597,13 +601,21 @@ static void texpack_start(uint64_t key) {
+         } else {
+             logf("vitart: pack de texturas: não abriu %s", path.c_str());
+         }
+-        {
+-            std::lock_guard<std::mutex> l(g_tp_sem_mutex);
+-            g_tp_running--;
+-        }
+-        g_tp_sem_cv.notify_one();
+         job->done = true;
+-    });
++    }
++}
++static void texpack_start(uint64_t key) {
++    if (g_tp_jobs.count(key)) return;
++    auto job = std::make_shared<TexpackJob>();
++    g_tp_jobs[key] = job;
++    bool nova = false;
++    {
++        std::lock_guard<std::mutex> l(g_tp_sem_mutex);
++        g_tp_queue.emplace_back(job, tp_path(key));
++        if (g_tp_workers < kTpWorkers) g_tp_workers++, nova = true;
++    }
++    g_tp_sem_cv.notify_one();
++    if (nova) vt::spawn_detached(texpack_worker, "texpack");
+ }
+ // PNG pronto para a chave: valida pelo conteúdo contra a textura original e devolve o HD (ou nulo).
+ static std::shared_ptr<std::vector<uint8_t>> texpack_take(uint64_t key, const gxmtex::Info &info,
+@@ -1827,7 +1839,12 @@ void gxm_present(uint32_t fb) {
+         pbr::tick(g_present_frame.load()); // pbr.ini ao vivo e mapas parados fora da memória
+     }
+     PTRACE("pbr ok");
+-    if (g_texpack_bytes > (1536ull << 20)) {
++#ifdef __SWITCH__
++    constexpr uint64_t kTexpackMax = 384ull << 20; // o processo inteiro tem ~3,1 GB, 1 GB vai para o guest
++#else
++    constexpr uint64_t kTexpackMax = 1536ull << 20;
++#endif
++    if (g_texpack_bytes > kTexpackMax) {
+         const std::lock_guard<std::mutex> lock(g_vk_mutex);
+         const uint32_t now = g_present_frame.load();
+         for (auto &[k, e] : g_texcache)
