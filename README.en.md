@@ -15,7 +15,7 @@
 
 🇧🇷 [Português](README.md) · 🇺🇸 **English** · 🇪🇸 [Español](README.es.md)
 
-[About](#-about) · [Features](#-features) · [Performance](#-performance) · [Installation](#-installation) · [Controls](#-controls) · [Building](#%EF%B8%8F-building) · [Credits](#-credits) · [**Support**](#-support-the-project)
+[About](#-about) · [Features](#-features) · [Performance](#-performance) · [Installation](#-installation) · [Add-ons](#-optional-add-ons) · [Controls](#-controls) · [Building](#%EF%B8%8F-building) · [Credits](#-credits) · [**Support**](#-support-the-project)
 
 </div>
 
@@ -93,6 +93,69 @@ sdmc:/switch/gow-nx/
 ```
 
 3. Open **God of War Collection** from the Homebrew Menu and pick a game.
+
+## 🧩 Optional add-ons
+
+Everything below goes in `sdmc:/switch/gow-nx/data/`. Each add-on is optional; without it the game uses the original Vita assets.
+
+### HD textures
+
+One folder per game, with an `index.tsv` and the PNGs:
+
+```
+sdmc:/switch/gow-nx/data/texpack/
+├── gow1/
+│   ├── index.tsv      <texture key in hex><TAB><file.png>, one per line
+│   └── *.png
+└── gow2/
+    ├── index.tsv
+    └── *.png
+```
+
+- The key is the hash of the original Vita texture, so a pack is built for this port (a PCSX2 pack does not work as is: it has to be converted against the game files).
+- Turn it on with **HD Textures** in the NX Menu (hold **R** and press **+**) or in the pause menu **Options**, or set `hd_textures=1` in `data/vitart_options.ini`.
+- On the Switch the decoded HD textures are capped at 384 MB of memory; very large packs load more slowly in new areas.
+
+### PS2 audio
+
+Replaces the Vita music, voices and effects with the PS2 version's audio. It needs files extracted from **your own** PS2 disc:
+
+```
+sdmc:/switch/gow-nx/data/
+├── ps2audio.bin             God of War
+├── ps2audio_files.idx
+├── ps2audio_gow2.bin        God of War II
+└── ps2audio_gow2_files.idx
+```
+
+- The same files from the PC version's `data` folder work here unchanged.
+- Turn it on with **PS2 Audio** in the pause menu **Options**, or set `ps2_audio=1` in `data/vitart_options.ini`. Without the files the option shows *Unavailable*.
+
+### HD videos (remastered cutscenes)
+
+One folder per game, with the `.mp4` files and an `index.tsv`. **Without the `index.tsv` the folder is ignored.**
+
+```
+sdmc:/switch/gow-nx/data/videos/
+├── gow1/
+│   ├── index.tsv
+│   └── Semo01.mp4, Semo01A.mp4, ...
+└── gow2/
+    ├── index.tsv
+    └── IntroHUD.mp4, ColossusEye.mp4, ...
+```
+
+Each line of `index.tsv` is the name of the game's video (the `.bk2`, without extension), a **TAB** and the `.mp4` file. An optional third column is a delay in seconds, for a video that starts out of sync:
+
+```
+IntroHUD	IntroHUD.mp4
+ColossusEye	ColossusEye.mp4
+Semo01B	Semo01A.mp4	0.5
+```
+
+- H.264 or HEVC, decoded by the Switch's hardware decoder. **1280x720 at 30 fps** is the recommended format; 1440p/60 fps works but is much heavier.
+- The game's own video keeps playing underneath (sound, skipping with X and the end of the scene are unchanged); only the picture is replaced.
+- If a video does not show, check `logs/vitart_<game>.log` for the `cena remasterizada` lines.
 
 ## 🎮 Controls
 
