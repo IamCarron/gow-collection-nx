@@ -44,6 +44,7 @@ typedef struct {
     const char *btn_jogar;
     const char *btn_abrir;
     const char *btn_sair;
+    const char *menu_sair;
     const char *btn_mudar;
     const char *btn_salvar;
     const char *upd_menu;
@@ -105,6 +106,7 @@ static const Textos kTextos[NLANG] = {
         .btn_jogar = " Play",
         .btn_abrir = " Open",
         .btn_sair = " Exit",
+        .menu_sair = "Exit",
         .btn_mudar = " Change",
         .btn_salvar = " Save and back",
         .upd_menu = "Check for updates",
@@ -164,6 +166,7 @@ static const Textos kTextos[NLANG] = {
         .btn_jogar = " Jugar",
         .btn_abrir = " Abrir",
         .btn_sair = " Salir",
+        .menu_sair = "Salir",
         .btn_mudar = " Cambiar",
         .btn_salvar = " Guardar y volver",
         .upd_menu = "Buscar actualizaciones",
@@ -223,6 +226,7 @@ static const Textos kTextos[NLANG] = {
         .btn_jogar = " Jogar",
         .btn_abrir = " Abrir",
         .btn_sair = " Sair",
+        .menu_sair = "Sair",
         .btn_mudar = " Mudar",
         .btn_salvar = " Salvar e voltar",
         .upd_menu = "Buscar atualizações",
@@ -282,6 +286,7 @@ static const Textos kTextos[NLANG] = {
         .btn_jogar = " Jouer",
         .btn_abrir = " Ouvrir",
         .btn_sair = " Quitter",
+        .menu_sair = "Quitter",
         .btn_mudar = " Changer",
         .btn_salvar = " Enregistrer et retour",
         .upd_menu = "Rechercher des mises à jour",
@@ -341,6 +346,7 @@ static const Textos kTextos[NLANG] = {
         .btn_jogar = " Gioca",
         .btn_abrir = " Apri",
         .btn_sair = " Esci",
+        .menu_sair = "Esci",
         .btn_mudar = " Cambia",
         .btn_salvar = " Salva e torna",
         .upd_menu = "Cerca aggiornamenti",
@@ -400,6 +406,7 @@ static const Textos kTextos[NLANG] = {
         .btn_jogar = " Spielen",
         .btn_abrir = " Öffnen",
         .btn_sair = " Beenden",
+        .menu_sair = "Beenden",
         .btn_mudar = " Ändern",
         .btn_salvar = " Speichern & zurück",
         .upd_menu = "Nach Updates suchen",
@@ -469,9 +476,11 @@ static const Jogo jogos[] = {
 #define ITEM_OPCOES  (N + 1)
 #ifdef ENABLE_UPDATER
 #define ITEM_UPD     (N + 2)
-#define NMENU        (N + 3)
+#define ITEM_SAIR    (N + 3)
+#define NMENU        (N + 4)
 #else
-#define NMENU        (N + 2)
+#define ITEM_SAIR    (N + 2)
+#define NMENU        (N + 3)
 #endif
 static int jogo_ok[N];
 
@@ -1266,54 +1275,47 @@ static void desenhar(int sel, int msg, u64 tick) {
     else { for (int y = 0; y < H; y++) memset(&px[y * pitch], 0, W * 4); }
     float pulso = 0.5f + 0.5f * sinf(tick * 0.06f);
 
-    texto_sombra(110, 210, 26, CINZA, 255, t->escolher);
-    retangulo(110, 224, 260, 2, OURO_ESC, 200);
+    texto_sombra(110, 178, 26, CINZA, 255, t->escolher);
+    retangulo(110, 192, 260, 2, OURO_ESC, 200);
 
     for (int i = 0; i < N; i++) {
-        int y = 296 + i * 106;
+        int y = 260 + i * 98;
         int ok = jogo_ok[i], s = i == sel;
         if (s) {
-            for (int x = 96; x < 560; x++) retangulo(x, y - 50, 1, 82, OURO_ESC, 80 * (560 - x) / 464);
-            retangulo(90, y - 50, 6, 82, OURO, 150 + (int)(105 * pulso));
+            for (int x = 96; x < 560; x++) retangulo(x, y - 48, 1, 80, OURO_ESC, 80 * (560 - x) / 464);
+            retangulo(90, y - 48, 6, 80, OURO, 150 + (int)(105 * pulso));
         }
-        texto_sombra(120, y, s ? 48 : 42, s ? OURO : CINZA, s ? 255 : 200, jogos[i].titulo);
+        texto_sombra(120, y, s ? 46 : 40, s ? OURO : CINZA, s ? 255 : 200, jogos[i].titulo);
         texto_sombra(122, y + 26, 20, ok ? (s ? BRANCO : CINZA) : VERMELHO, s ? 230 : 160,
                      ok ? t->sub_jogos[i] : t->falta_arq);
     }
 
-    {   // Troféus
-        int y = 486, s = sel == ITEM_TROFEUS;
-        if (s) {
-            for (int x = 96; x < 560; x++) retangulo(x, y - 32, 1, 44, OURO_ESC, 80 * (560 - x) / 464);
-            retangulo(90, y - 32, 5, 44, OURO, 150 + (int)(105 * pulso));
-        }
-        texto_sombra(120, y, s ? 30 : 26, s ? OURO : CINZA, s ? 255 : 200, t->trp_menu);
-    }
-    {   // Opções
-        int y = 538, s = sel == ITEM_OPCOES;
-        if (s) {
-            for (int x = 96; x < 560; x++) retangulo(x, y - 32, 1, 44, OURO_ESC, 80 * (560 - x) / 464);
-            retangulo(90, y - 32, 5, 44, OURO, 150 + (int)(105 * pulso));
-        }
-        texto_sombra(120, y, s ? 30 : 26, s ? OURO : CINZA, s ? 255 : 200, t->opcoes_menu);
-    }
+    {   // Itens secundários (Troféus, Opções, Atualizador, Sair)
+        const char *rotulos[4];
+        int ids[4], nsec = 0;
+        rotulos[nsec] = t->trp_menu;    ids[nsec++] = ITEM_TROFEUS;
+        rotulos[nsec] = t->opcoes_menu; ids[nsec++] = ITEM_OPCOES;
 #ifdef ENABLE_UPDATER
-    {   // Atualizador
-        int y = 590, s = sel == ITEM_UPD;
-        if (s) {
-            for (int x = 96; x < 560; x++) retangulo(x, y - 32, 1, 44, OURO_ESC, 80 * (560 - x) / 464);
-            retangulo(90, y - 32, 5, 44, OURO, 150 + (int)(105 * pulso));
-        }
-        texto_sombra(120, y, s ? 30 : 26, s ? OURO : CINZA, s ? 255 : 200, t->upd_menu);
-    }
+        rotulos[nsec] = t->upd_menu;    ids[nsec++] = ITEM_UPD;
 #endif
+        rotulos[nsec] = t->menu_sair;   ids[nsec++] = ITEM_SAIR;
+        for (int i = 0; i < nsec; i++) {
+            int y = 432 + i * 46, s = sel == ids[i];
+            if (s) {
+                for (int x = 96; x < 560; x++) retangulo(x, y - 30, 1, 42, OURO_ESC, 80 * (560 - x) / 464);
+                retangulo(90, y - 30, 5, 42, OURO, 150 + (int)(105 * pulso));
+            }
+            texto_sombra(120, y, s ? 28 : 24, s ? OURO : CINZA, s ? 255 : 200, rotulos[i]);
+        }
+    }
 
     const char *ms = msg_texto(msg);
     if (ms) texto_sombra(110, 640, 22, VERMELHO, 255, ms);
 
     int x = 110, yb = 676;
+    const char *lbl_a = sel == ITEM_SAIR ? t->btn_sair : sel >= N ? t->btn_abrir : t->btn_jogar;
     x += texto_sombra(x, yb, 28, BRANCO, 255, "\xEE\x83\xA0");   // U+E0E0 botão A
-    x += texto_sombra(x + 4, yb, 22, BRANCO, 230, sel >= N ? t->btn_abrir : t->btn_jogar) + 44;
+    x += texto_sombra(x + 4, yb, 22, BRANCO, 230, lbl_a) + 44;
     x += texto_sombra(x, yb, 28, BRANCO, 255, "\xEE\x83\xAF");   // U+E0EF botão +
     texto_sombra(x + 4, yb, 22, BRANCO, 230, t->btn_sair);
 
@@ -1514,6 +1516,7 @@ int main(int argc, char **argv) {
             upd_start_check(VERSAO);
         }
 #endif
+        else if ((k & HidNpadButton_A) && sel == ITEM_SAIR) break;
         else if (k & HidNpadButton_A) {
             char p[FS_MAX_PATH]; caminho(p, sizeof p, sel);
             jogo_ok[sel] = existe(p);
