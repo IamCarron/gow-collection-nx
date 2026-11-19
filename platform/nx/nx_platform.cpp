@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -205,10 +206,47 @@ std::mutex g_known_mutex;
 std::vector<KnownThread> g_known;
 void register_current(const std::string &name) {
     const std::lock_guard<std::mutex> lock(g_known_mutex);
-    g_known.push_back({threadGetCurHandle(), name});
+    const Handle h = threadGetCurHandle();
+    for (KnownThread &k : g_known)
+        if (k.h == h) return void(k.name = name); // thread reaproveitada: só troca o nome
+    g_known.push_back({h, name});
 }
+// Threads que terminaram a tarefa e esperam outra. No libnx uma thread destacada que termina não devolve a pilha
+// nem o objeto da thread: cada tarefa curta (busca do HBINK a cada vídeo, carga de som, material PBR) gastava 4 MiB
+// para sempre, até o "pthread_create falhou (12)". Agora a thread que acaba fica parada aqui e pega a próxima tarefa.
+struct Parked {
+    std::function<void()> fn;
+    std::string name;
+    bool has = false;
+    std::condition_variable cv;
+};
+std::mutex g_pool_mutex;
+std::vector<Parked *> g_parked;
+void apply_thread_profile(Handle me, const std::string &name, s32 base_prio);
 void *thread_entry(void *arg) {
-    std::unique_ptr<ThreadStart> s(static_cast<ThreadStart *>(arg));
+    std::function<void()> fn;
+    std::string name;
+    {
+        std::unique_ptr<ThreadStart> s(static_cast<ThreadStart *>(arg));
+        fn = std::move(s->fn), name = std::move(s->name);
+    }
+    const Handle me = threadGetCurHandle();
+    s32 base_prio = 0x2C;
+    svcGetThreadPriority(&base_prio, me);
+    Parked slot;
+    for (;;) {
+        apply_thread_profile(me, name, base_prio);
+        register_current(name);
+        fn();
+        fn = nullptr;
+        std::unique_lock<std::mutex> l(g_pool_mutex);
+        g_parked.push_back(&slot);
+        slot.cv.wait(l, [&] { return slot.has; });
+        slot.has = false;
+        fn = std::move(slot.fn), name = std::move(slot.name);
+    }
+}
+void apply_thread_profile(Handle me, const std::string &name, s32 base_prio) {
     // O libnx cria toda thread no núcleo padrão, e o Horizon não reveza threads de mesma prioridade: uma que não
     // dorme toma o núcleo. Cada thread nova ganha um núcleo ideal (0..2, em rodízio) e pode migrar entre os três.
     //
@@ -217,24 +255,32 @@ void *thread_entry(void *arg) {
     // (0, 1 e 2) e prioridade acima das outras, que ficam livres nos três núcleos (ideal 2) e só rodam onde uma
     // delas estiver esperando: uma thread qualquer nunca atrasa as três. VITART_NX_PIN=0 volta ao rodízio antigo.
     static const bool pin = !(getenv("VITART_NX_PIN") && *getenv("VITART_NX_PIN") == '0');
-    const Handle me = threadGetCurHandle();
+    s32 prio = base_prio; // reaproveitada: volta à prioridade de quando foi criada
     if (!pin) svcSetThreadCoreMask(me, (s32)(g_next_core++ % 3), 0x7);
-    else if (s->name == "main") svcSetThreadCoreMask(me, 0, 0x1), svcSetThreadPriority(me, 0x2A);
-    else if (s->name == "Render") svcSetThreadCoreMask(me, 1, 0x2), svcSetThreadPriority(me, 0x2A);
-    else if (s->name == "gravacao vk") svcSetThreadCoreMask(me, 2, 0x4), svcSetThreadPriority(me, 0x2B);
+    else if (name == "main") svcSetThreadCoreMask(me, 0, 0x1), prio = 0x2A;
+    else if (name == "Render") svcSetThreadCoreMask(me, 1, 0x2), prio = 0x2A;
+    else if (name == "gravacao vk") svcSetThreadCoreMask(me, 2, 0x4), prio = 0x2B;
     // Som: dorme quase sempre e acorda a cada poucos ms com prazo curto; acima de todas para não engasgar quando a
     // gravação Vulkan (núcleo 2, 0x2B) está ocupada.
-    else if (s->name == "audio" || s->name == "audio_out_thread" || s->name == "SndStreamThread")
-        svcSetThreadCoreMask(me, 2, 0x7), svcSetThreadPriority(me, 0x28);
+    else if (name == "audio" || name == "audio_out_thread" || name == "SndStreamThread")
+        svcSetThreadCoreMask(me, 2, 0x7), prio = 0x28;
     else svcSetThreadCoreMask(me, 2, 0x7);
-    register_current(s->name);
-    s->fn();
-    return nullptr;
+    svcSetThreadPriority(me, prio);
 }
 } // namespace
 
 namespace vt {
 void spawn_detached(std::function<void()> fn, const char *name) {
+    {
+        const std::lock_guard<std::mutex> l(g_pool_mutex);
+        if (!g_parked.empty()) { // há uma thread parada: ela pega a tarefa, sem criar outra
+            Parked *p = g_parked.back();
+            g_parked.pop_back();
+            p->fn = std::move(fn), p->name = name ? name : "?", p->has = true;
+            p->cv.notify_one();
+            return;
+        }
+    }
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, 4u << 20); // o C recompilado empilha os quadros do guest no host

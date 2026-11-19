@@ -1,6 +1,6 @@
 // windows.h mínimo para o build do Switch: só o que o vitart e games/gow usam fora dos caminhos que já
-// têm versão própria do Switch. A memória do guest é um bloco contínuo sempre confirmado
-// (nx_platform.cpp), então VirtualQuery responde "confirmada, leitura e escrita" dentro dele.
+// têm versão própria do Switch. VirtualQuery pergunta ao kernel (svcQueryMemory) dentro da faixa do guest:
+// as varreduras da memória do jogo (HBINK das cenas em vídeo, vida dos inimigos) pulam o que não está mapeado.
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -55,18 +55,26 @@ inline SIZE_T VirtualQuery(const void *p, MEMORY_BASIC_INFORMATION *mi, SIZE_T) 
     std::memset(mi, 0, sizeof *mi);
     if (a >= hi) return 0;
     const uintptr_t page = reinterpret_cast<uintptr_t>(a) & ~(uintptr_t)0xFFF;
+    mi->BaseAddress = reinterpret_cast<void *>(page);
     if (a < lo) { // abaixo do guest: livre até o começo do bloco
-        mi->BaseAddress = reinterpret_cast<void *>(page);
         mi->RegionSize = static_cast<SIZE_T>(lo - reinterpret_cast<const uint8_t *>(page));
         mi->State = MEM_FREE;
         mi->Protect = PAGE_NOACCESS;
         return sizeof *mi;
     }
-    mi->BaseAddress = reinterpret_cast<void *>(page);
+    MemoryInfo k{};
+    u32 pi = 0;
+    uintptr_t end = reinterpret_cast<uintptr_t>(hi);
+    bool ok = false;
+    if (R_SUCCEEDED(svcQueryMemory(&k, &pi, page))) {
+        const uintptr_t kend = static_cast<uintptr_t>(k.addr + k.size);
+        if (kend > page && kend < end) end = kend;
+        ok = k.type != MemType_Unmapped && (k.perm & Perm_R);
+    }
     mi->AllocationBase = const_cast<uint8_t *>(lo);
-    mi->RegionSize = static_cast<SIZE_T>(hi - reinterpret_cast<const uint8_t *>(page));
-    mi->State = MEM_COMMIT;
-    mi->Protect = mi->AllocationProtect = PAGE_READWRITE;
+    mi->RegionSize = static_cast<SIZE_T>(end - page);
+    mi->State = ok ? MEM_COMMIT : MEM_FREE;
+    mi->Protect = mi->AllocationProtect = ok ? PAGE_READWRITE : PAGE_NOACCESS;
     return sizeof *mi;
 }
 
