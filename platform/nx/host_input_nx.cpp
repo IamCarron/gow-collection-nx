@@ -7,6 +7,8 @@
 
 #include <switch.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <mutex>
 
@@ -24,6 +26,17 @@ uint8_t ay(s32 v) { return (uint8_t)(255 - ((v + 32768) >> 8)); } // libnx: cima
 void deadzone(uint8_t &x, uint8_t &y, int dz) {
     const int dx = x - 128, dy = y - 128;
     if (dx * dx + dy * dy < dz * dz) x = y = 128;
+}
+// O stick do Switch é redondo: na diagonal toda cada eixo chega só a ~71%. O stick do Vita vai até o canto do
+// quadrado, e o jogo lê os eixos separados, então andar na diagonal ficava mais lento. A posição é levada do círculo
+// ao quadrado: mesma direção, e a força (distância do centro) passa a valer o maior eixo.
+void circle_to_square(uint8_t &x, uint8_t &y) {
+    const float dx = (x - 128) / 127.f, dy = (y - 128) / 127.f;
+    const float m = std::min(1.f, std::sqrt(dx * dx + dy * dy)), big = std::max(std::fabs(dx), std::fabs(dy));
+    if (big < 1e-4f) return;
+    const float k = m / big;
+    x = (uint8_t)std::lround(std::clamp(128.f + dx * k * 127.f, 0.f, 255.f));
+    y = (uint8_t)std::lround(std::clamp(128.f + dy * k * 127.f, 0.f, 255.f));
 }
 } // namespace
 
@@ -58,6 +71,8 @@ State poll() {
     s.lx = ax(l.x), s.ly = ay(l.y), s.rx = ax(r.x), s.ry = ay(r.y);
     deadzone(s.lx, s.ly, 20);
     deadzone(s.rx, s.ry, 20);
+    circle_to_square(s.lx, s.ly);
+    circle_to_square(s.rx, s.ry);
     s.active = 4; // ícones de botão do Nintendo
     // R + Plus é do mod menu (nx_menu.cpp): com R apertado o Plus não chega ao jogo; com o menu aberto (e até soltar
     // os botões depois de fechar) o jogo recebe o controle parado
