@@ -162,8 +162,14 @@ struct Decoder {
                 logf("vitart: cenas remasterizadas: NVDEC pronto");
         }
         if (!g_hwdev) return false;
-        if (avformat_open_input(&fmt, path.c_str(), nullptr, nullptr) < 0 || avformat_find_stream_info(fmt, nullptr) < 0) {
-            logf("vitart: cena remasterizada: não abriu %s", path.c_str());
+        // "sdmc:/..." sozinho o FFmpeg lê como protocolo "sdmc" (igual a "http:") e não abre: vai como file:
+        const std::string url = path.compare(0, 5, "file:") == 0 ? path : "file:" + path;
+        int r = avformat_open_input(&fmt, url.c_str(), nullptr, nullptr);
+        if (r >= 0) r = avformat_find_stream_info(fmt, nullptr);
+        if (r < 0) {
+            char err[128];
+            av_strerror(r, err, sizeof err);
+            logf("vitart: cena remasterizada: não abriu %s (%s)", path.c_str(), err);
             close();
             return false;
         }
