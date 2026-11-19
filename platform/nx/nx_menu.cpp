@@ -1,6 +1,7 @@
 // Mod menu do Switch: R + Plus abre/fecha. Desenho na CPU (fonte do sistema pelo FreeType), copiado pela apresentação
 // para a imagem da swapchain (gxm_vk.cpp). As mudanças vão para game_options.cpp pela ponte nxopt.
 #include "nx_menu.h"
+#include "nx_platform.h"
 #include "vitart.h"
 
 #include <switch.h>
@@ -23,17 +24,120 @@ uint32_t g_val[nxopt::COUNT] = {};
 bool g_dirty = true;
 int g_hold = 0, g_hold_dir = 0;
 
-struct Item {
-    int id; // nxopt::Id, -1 = fechar
-    const char *nome;
+enum Lang { LANG_EN = 0, LANG_ES, LANG_PT, LANG_FR, LANG_IT, LANG_DE, LANG_COUNT };
+
+struct MenuTexts {
+    const char *items[7]; // RES, FPS, VSYNC, COUNTER, TEX, HPBARS, fechar
+    const char *fps_max;
+    const char *on;
+    const char *off;
+    const char *unavail;
+    const char *hint;
 };
-const Item kItems[] = {
-    {nxopt::RES, "Internal resolution"},
-    {nxopt::FPS, "Frame rate"},          {nxopt::VSYNC, "VSync"},          {nxopt::COUNTER, "FPS counter"},
-    {nxopt::TEX, "HD textures"},         {nxopt::HPBARS, "Enemy health bars"},
-    {-1, "Close menu"},
+
+const MenuTexts kTexts[LANG_COUNT] = {
+    // LANG_EN
+    {
+        {"Internal resolution", "Frame rate", "VSync", "FPS counter", "HD textures", "Enemy health bars", "Close menu"},
+        "Max", "On", "Off", "Unavailable",
+        "Up/Down: select     Left/Right: change     B: close",
+    },
+    // LANG_ES
+    {
+        {"Resolución interna", "Tasa de cuadros", "VSync", "Contador de FPS", "Texturas HD", "Barras de vida enemigas", "Cerrar menú"},
+        "Máximo", "Activado", "Desactivado", "No disponible",
+        "Arriba/Abajo: elegir   Izq/Der: cambiar   B: cerrar",
+    },
+    // LANG_PT
+    {
+        {"Resolução interna", "Taxa de quadros", "VSync", "Contador de FPS", "Texturas HD", "Barras de vida dos inimigos", "Fechar menu"},
+        "Máximo", "Ligado", "Desligado", "Indisponível",
+        "Cima/Baixo: escolher   Esq/Dir: mudar   B: fechar",
+    },
+    // LANG_FR
+    {
+        {"Résolution interne", "Images par seconde", "VSync", "Compteur de FPS", "Textures HD", "Barres de vie ennemies", "Fermer le menu"},
+        "Max", "Activé", "Désactivé", "Indisponible",
+        "Haut/Bas: choisir   Gauche/Droite: changer   B: fermer",
+    },
+    // LANG_IT
+    {
+        {"Risoluzione interna", "Frequenza fotogrammi", "VSync", "Contatore FPS", "Texture HD", "Barre vita nemici", "Chiudi menu"},
+        "Massimo", "Attivato", "Disattivato", "Non disponibile",
+        "Su/Giù: scegli   Sinistra/Destra: cambia   B: chiudi",
+    },
+    // LANG_DE
+    {
+        {"Interne Auflösung", "Bildrate", "VSync", "FPS-Zähler", "HD-Texturen", "Gegner-Lebensleisten", "Menü schließen"},
+        "Maximum", "Ein", "Aus", "Nicht verfügbar",
+        "Hoch/Runter: wählen  Links/Rechts: ändern  B: schließen",
+    },
 };
-constexpr int kN = sizeof kItems / sizeof kItems[0];
+
+int g_lang = LANG_EN;
+bool g_lang_loaded = false;
+
+int detect_switch_lang() {
+    u64 code = 0;
+    if (R_SUCCEEDED(setInitialize())) {
+        if (R_FAILED(setGetSystemLanguage(&code))) code = 0;
+        setExit();
+    }
+    char tag[9];
+    std::memcpy(tag, &code, 8);
+    tag[8] = 0;
+    if (!std::strncmp(tag, "es", 2)) return LANG_ES;
+    if (!std::strncmp(tag, "pt", 2)) return LANG_PT;
+    if (!std::strncmp(tag, "fr", 2)) return LANG_FR;
+    if (!std::strncmp(tag, "it", 2)) return LANG_IT;
+    if (!std::strncmp(tag, "de", 2)) return LANG_DE;
+    return LANG_EN;
+}
+
+int parse_lang_code(const char *v) {
+    if (!std::strcmp(v, "en")) return LANG_EN;
+    if (!std::strcmp(v, "es")) return LANG_ES;
+    if (!std::strcmp(v, "pt-BR") || !std::strcmp(v, "pt") || !std::strcmp(v, "pt_BR") || !std::strcmp(v, "pt-br")) return LANG_PT;
+    if (!std::strcmp(v, "fr")) return LANG_FR;
+    if (!std::strcmp(v, "it")) return LANG_IT;
+    if (!std::strcmp(v, "de")) return LANG_DE;
+    return -1;
+}
+
+int load_lang() {
+    const int sys_lang = detect_switch_lang();
+    constexpr int kUnset = -2, kAuto = -1;
+    int from_launcher = kUnset;
+    int from_lang = kUnset;
+    const std::string ini = nxp::root_dir() + "/data/vitart_options.ini";
+    if (std::FILE *f = std::fopen(ini.c_str(), "r")) {
+        char line[256];
+        while (std::fgets(line, sizeof line, f)) {
+            size_t len = std::strlen(line);
+            while (len && (unsigned char)line[len - 1] <= 32) line[--len] = 0;
+            if (!std::strncmp(line, "launcher_language=", 18)) {
+                const char *v = line + 18;
+                if (!std::strcmp(v, "auto")) from_launcher = kAuto;
+                else {
+                    const int p = parse_lang_code(v);
+                    if (p >= 0) from_launcher = p;
+                }
+            } else if (!std::strncmp(line, "language=", 9)) {
+                const int p = parse_lang_code(line + 9);
+                if (p >= 0) from_lang = p;
+            }
+        }
+        std::fclose(f);
+    }
+    if (from_launcher == kAuto) return sys_lang;
+    if (from_launcher >= 0) return from_launcher;
+    if (from_lang >= 0) return from_lang;
+    return sys_lang;
+}
+
+constexpr int kItemIds[] = {nxopt::RES, nxopt::FPS, nxopt::VSYNC, nxopt::COUNTER, nxopt::TEX, nxopt::HPBARS, -1};
+constexpr int kN = (int)(sizeof kItemIds / sizeof kItemIds[0]);
+static_assert(kN == 7);
 
 // resolução: ordem do menu -> código da opção (5 = 720p)
 const uint32_t kRes[] = {1, 6, 5, 2, 3, 4};
@@ -63,22 +167,27 @@ uint32_t val_of(int id, int p) {
     return (uint32_t)p;
 }
 std::string val_text(int id, uint32_t v) {
+    const MenuTexts &t = kTexts[g_lang];
     char b[48];
     switch (id) {
     case nxopt::RES: return kResNome[pos_of(id, v)];
     case nxopt::SHARP: std::snprintf(b, sizeof b, "%u", v); return b;
-    case nxopt::FPS: return v == 3 ? "Max" : v == 2 ? "60" : "30";
-    default: return v ? "On" : "Off";
+    case nxopt::FPS: return v == 3 ? t.fps_max : v == 2 ? "60" : "30";
+    default: return v ? t.on : t.off;
     }
 }
 bool item_ok(int i) {
-    const int id = kItems[i].id;
+    const int id = kItemIds[i];
     if (id < 0) return true;
     if (id == nxopt::SHARP) return false;
     return nxopt::available(id);
 }
 
 void open() {
+    if (!g_lang_loaded) {
+        g_lang = load_lang();
+        g_lang_loaded = true;
+    }
     for (int i = 0; i < nxopt::COUNT; i++) g_val[i] = nxopt::get(i);
     if (!item_ok(g_sel)) g_sel = 0;
     g_active = true, g_block = true, g_dirty = true;
@@ -89,7 +198,7 @@ void close() {
     vt::logf("nxmenu: fechado");
 }
 void change(int dir) {
-    const int id = kItems[g_sel].id;
+    const int id = kItemIds[g_sel];
     if (id < 0) return;
     const int n = n_vals(id);
     int p = pos_of(id, g_val[id]) + dir;
@@ -130,7 +239,7 @@ void update() {
     }
     if (down & (HidNpadButton_B | HidNpadButton_Plus)) { close(); return; }
     if (down & HidNpadButton_A) {
-        if (kItems[g_sel].id < 0) { close(); return; }
+        if (kItemIds[g_sel] < 0) { close(); return; }
         change(+1);
     }
     if (down & HidNpadButton_AnyLeft) change(-1);
@@ -245,6 +354,7 @@ void draw(uint32_t screen_h) {
 #endif
     text((int)g_w - S(24) - text_w(jogo, S(20)), S(42), jogo, S(20), grey);
     rect(S(20), head - S(10), (int)g_w - S(40), S(2), off);
+    const MenuTexts &t = kTexts[g_lang];
     for (int i = 0; i < kN; i++) {
         const int y = head + row * i;
         const bool ok = item_ok(i), sel = i == g_sel;
@@ -254,10 +364,10 @@ void draw(uint32_t screen_h) {
         }
         const uint32_t tc = !ok ? off : sel ? white : 0xffcfccd6u;
         const int base = y + row / 2 + S(8);
-        text(S(30), base, kItems[i].nome, S(22), tc);
-        const int id = kItems[i].id;
+        text(S(30), base, t.items[i], S(22), tc);
+        const int id = kItemIds[i];
         if (id >= 0) {
-            std::string v = ok ? val_text(id, g_val[id]) : "Unavailable";
+            std::string v = ok ? val_text(id, g_val[id]) : t.unavail;
             if (sel && ok) v = "<  " + v + "  >";
             const uint32_t vc = !ok ? off : sel ? gold : white;
             text((int)g_w - S(30) - text_w(v.c_str(), S(22)), base, v.c_str(), S(22), vc);
@@ -265,8 +375,7 @@ void draw(uint32_t screen_h) {
     }
     const int fy = (int)g_h - foot;
     rect(S(20), fy, (int)g_w - S(40), S(2), off);
-    const char *dica = "Up/Down: select     Left/Right: change     B: close";
-    text(((int)g_w - text_w(dica, S(18))) / 2, fy + S(30), dica, S(18), grey);
+    text(((int)g_w - text_w(t.hint, S(18))) / 2, fy + S(30), t.hint, S(18), grey);
 }
 } // namespace
 

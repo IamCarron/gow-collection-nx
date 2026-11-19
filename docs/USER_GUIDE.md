@@ -5,14 +5,27 @@
 1. Abra o Homebrew Menu **segurando R ao abrir um jogo** (title takeover). Pelo Álbum (modo applet) a memória não é
    suficiente.
 2. Abra **God of War Collection** (`gow-nx.nro`).
-3. Escolha o jogo com **Cima/Baixo** e aperte **A**. O **+** sai.
+3. Escolha o jogo, **Opções** ou **Buscar atualizações** com **Cima/Baixo** e aperte **A**. O **+** sai.
+
+Em **Opções** você configura o idioma (detecção automática do idioma do Switch ou seleção manual entre inglês, espanhol,
+português brasileiro, francês, italiano e alemão) e as opções gráficas compartilhadas entre os dois jogos (resolução
+interna, taxa de quadros, VSync, proporção da tela, contador de FPS, texturas HD e barras de vida dos inimigos). Use
+**Esquerda/Direita** ou **A** para mudar e **B** para salvar em `data/vitart_options.ini`.
+
+Em **Buscar atualizações** (quando compilado com `switch-curl`), o launcher consulta o último release no GitHub, baixa
+e instala a atualização sem tocar nos seus saves/opções (`data/`), arquivos do jogo (`game/`), `logs/` nem
+`launcher.cfg`, e reinicia o launcher automaticamente.
 
 O launcher lembra a última escolha (`launcher.cfg`, na mesma pasta) e carrega o NRO do jogo pelo Homebrew Menu. Ao
 sair do jogo você volta ao Homebrew Menu. Também dá para abrir `gow1.nro` ou `gow2.nro` direto.
 
-Sem `bg.bgra`/`music.mp3` no romfs, o launcher abre com fundo preto e sem música.
+Sem `bg.bgra`/`music.mp3` no romfs nem na pasta do launcher no SD, o launcher abre com fundo preto e sem música.
 
 ## Opções no jogo
+
+A qualquer momento durante o jogo, segure **R** e aperte **+** para abrir o **NX Menu** (resolução interna, taxa de
+quadros, VSync, contador de FPS, texturas HD e barras de vida dos inimigos), exibido no mesmo idioma escolhido no
+launcher (ou no idioma do Switch).
 
 No menu de pausa, **Options** (precisa do mod de menu do
 [GOD-OF-WAR-HD-COLLECTION](https://github.com/luisxl15/GOD-OF-WAR-HD-COLLECTION) em `data/mods`):
@@ -28,7 +41,9 @@ No menu de pausa, **Options** (precisa do mod de menu do
 | FPS Counter | liga / desliga | |
 | Cheats | vida, magia e fúria infinitas | |
 
-As opções ficam em `data/vitart_options.ini`. A resolução do Switch fica na chave `resolution_switch=`.
+As opções ficam em `data/vitart_options.ini`. A resolução do Switch fica em `resolution_switch=`, a preferência do
+launcher em `launcher_language=` (`auto` ou código do idioma) e o idioma resolvido em `language=` (`es`, `pt-BR`, `fr`,
+`it`, `de`; omitido em inglês).
 
 ## Relógios (clocks)
 

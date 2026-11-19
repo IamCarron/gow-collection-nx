@@ -42,7 +42,7 @@ runtime do vitaRT** (em forma de patches), o **launcher** e os scripts de compil
 | | |
 |---|---|
 | 🎮 **Nativo** | Código do jogo recompilado para ARM64, sem emulação de CPU |
-| ⚔️ **Dois jogos, um launcher** | `gow-nx.nro` abre um menu com capa e música e carrega *God of War* ou *God of War II* |
+| ⚔️ **Dois jogos, um launcher** | `gow-nx.nro` abre um menu multilíngue (detecção automática do idioma do Switch) com capa, música e opções |
 | ⚡ **30 FPS no relógio padrão** | Cenas pesadas de *God of War II* estáveis a 30 FPS com a CPU em 1020 MHz, sem overclock |
 | 🖥️ **Vulkan (NVK)** | GXM traduzido para Vulkan, com os comandos gravados numa thread dedicada |
 | 🧵 **Threads por núcleo** | Lógica, renderização, gravação Vulkan e áudio fixados nos 3 núcleos do Switch |
@@ -100,8 +100,10 @@ sdmc:/switch/gow-nx/
 
 | Botão | Ação |
 |---|---|
-| **Cima / Baixo** | Escolher o jogo |
-| **A** | Jogar |
+| **Cima / Baixo** | Escolher o jogo ou abrir **Opções** (idioma e gráficos) |
+| **A** | Jogar / abrir opções / mudar valor |
+| **Esquerda / Direita** | Mudar valor nas opções |
+| **B** | Salvar opções e voltar |
 | **+** | Sair |
 
 **No jogo** (layout do PS Vita no controle do Switch)
@@ -114,7 +116,7 @@ sdmc:/switch/gow-nx/
 | **X** | △ | | **−** | Select |
 | Analógicos | Analógicos | | L3 / R3 | L3 / R3 |
 
-Os ícones de botão do jogo aparecem com o layout da Nintendo.
+Segure **R** e aperte **+** no jogo para abrir o menu de opções do Switch (**NX Menu**). Os ícones de botão do jogo aparecem com o layout da Nintendo.
 
 ## 🛠️ Compilar
 
