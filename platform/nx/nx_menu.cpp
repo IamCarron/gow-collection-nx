@@ -3,6 +3,7 @@
 #include "nx_menu.h"
 #include "vitart.h"
 #include "nx_platform.h"
+#include "i18n.h"
 
 #include <switch.h>
 #include <ft2build.h>
@@ -87,120 +88,64 @@ int load_ui_lang() {
     return sys;
 }
 
-const char *L(const char *pt, const char *en_, const char *es_) {
-    return g_lang == UI_EN ? en_ : g_lang == UI_ES ? es_ : pt;
-}
+// Códigos dos idiomas embutidos (lang/<código>.ini), na ordem de UI_PT/UI_EN/UI_ES.
+const char *const kLangCode[3] = {"pt", "en", "es"};
 
 // Abas do menu (o mesmo visual do launcher: Gráficos / Mods / Cheats / Sistema)
 enum { T_GFX, T_MODS, T_CHEATS, T_SYS, kTabs };
-const char *const kTabNome[kTabs] = {"Gráficos", "Mods", "Cheats", "Sistema"};
-const char *const kTabNomeEn[kTabs] = {"Graphics", "Mods", "Cheats", "System"};
-const char *const kTabNomeEs[kTabs] = {"Gráficos", "Mods", "Trucos", "Sistema"};
-const char *tab_nome(int t) { return L(kTabNome[t], kTabNomeEn[t], kTabNomeEs[t]); }
+const char *const kTabChave[kTabs] = {"menu.tab.graphics", "menu.tab.mods", "menu.tab.cheats", "menu.tab.system"};
+const char *tab_nome(int t) { return tr(kTabChave[t]); }
 // ações que não são opções do jogo
 enum { A_CLOSE = -1, A_PRESET = -2, A_RESET = -3, A_LAUNCHER = -4, A_EXIT = -5 };
 
 struct Item {
     int tab, id; // id: nxopt::Id, ou uma ação A_*
-    const char *nome, *desc, *nome_en, *desc_en, *nome_es, *desc_es;
-    const char *n() const { return L(nome, nome_en, nome_es); }
-    const char *d() const { return L(desc, desc_en, desc_es); }
+    const char *nome, *desc; // chaves de tr()
+    const char *n() const { return tr(nome); }
+    const char *d() const { return tr(desc); }
 };
 const Item kItems[] = {
-    {T_GFX, A_PRESET, "Preset rápido", "Troca resolução interna e taxa de quadros de uma vez, sem reiniciar o jogo.",
-     "Quick preset", "Changes internal resolution and frame rate at once, without restarting the game.",
-     "Preset rápido", "Cambia resolución interna y tasa de cuadros a la vez, sin reiniciar el juego."},
-    {T_GFX, nxopt::RES, "Resolução (portátil)", "Resolução de renderização 3D antes da ampliação até a tela.",
-     "Resolution (handheld)", "3D render resolution before it is upscaled to the screen.",
-     "Resolución (portátil)", "Resolución de renderizado 3D antes de escalar a la pantalla."},
-    {T_GFX, nxopt::RES_DOCK, "Resolução (na TV)", "Resolução usada com o console na base. \"Igual ao portátil\" usa a de cima.",
-     "Resolution (TV)", "Resolution used while docked. \"Same as handheld\" uses the one above.",
-     "Resolución (en TV)", "Resolución usada en el dock. \"Igual al portátil\" usa la de arriba."},
-    {T_GFX, nxopt::UPSCALE, "Upscaler", "Como a imagem é ampliada até a tela. FSR 1.0 reconstrói bordas e aplica nitidez.",
-     "Upscaler", "How the image is scaled to the screen. FSR 1.0 rebuilds edges and sharpens.",
-     "Escalador", "Cómo se escala la imagen a la pantalla. FSR 1.0 reconstruye bordes y aplica nitidez."},
-    {T_GFX, nxopt::SHARP, "Nitidez (RCAS)", "Realce de nitidez depois da ampliação. Com FSR e nitidez Off, usa o padrão da AMD.",
-     "Sharpness (RCAS)", "Sharpening after upscaling. With FSR and sharpness Off, AMD's default is used.",
-     "Nitidez (RCAS)", "Realce de nitidez tras escalar. Con FSR y nitidez en Off, usa el valor de AMD."},
-    {T_GFX, nxopt::AA, "Anti-aliasing", "FXAA suaviza os serrilhados das bordas com custo baixo.",
-     "Anti-aliasing", "FXAA smooths jagged edges at a low cost.",
-     "Anti-aliasing", "FXAA suaviza los bordes dentados con un coste bajo."},
-    {T_GFX, nxopt::ANISO, "Filtro anisotrópico", "Deixa texturas de chão e paredes nítidas quando vistas de lado.",
-     "Anisotropic filtering", "Keeps floor and wall textures sharp at steep angles.",
-     "Filtro anisotrópico", "Mantiene nítidas las texturas de suelos y paredes en ángulos inclinados."},
-    {T_GFX, nxopt::GAMMA, "Brilho", "Ajuste de gama da imagem final.", "Brightness", "Gamma of the final image.",
-     "Brillo", "Ajuste de gamma de la imagen final."},
-    {T_GFX, nxopt::SAT, "Saturação", "Intensidade das cores.", "Saturation", "Color intensity.",
-     "Saturación", "Intensidad de los colores."},
-    {T_GFX, nxopt::VIB, "Vibrância", "Realça as cores mais apagadas sem estourar as já fortes.",
-     "Vibrance", "Boosts dull colors without blowing out strong ones.",
-     "Vibrancia", "Realza colores apagados sin saturar los que ya son intensos."},
-    {T_GFX, nxopt::DITHER, "Debanding", "Disfarça faixas em degradês (céu, névoa, sombras).",
-     "Debanding", "Hides banding in gradients (sky, fog, shadows).",
-     "Debanding", "Disimula bandas en degradados (cielo, niebla, sombras)."},
-    {T_GFX, nxopt::FGEN, "Geração de quadros", "Cria quadros intermediários (LSFG) compilados no deko3d.",
-     "Frame generation", "Creates in-between frames (LSFG) compiled for deko3d.",
-     "Generación de cuadros", "Crea cuadros intermedios (LSFG) compilados para deko3d."},
-    {T_GFX, nxopt::FGFLOW, "Fluxo da geração", "Resolução do fluxo óptico da geração de quadros. Menor é mais leve.",
-     "Generation flow", "Optical flow resolution for frame generation. Lower is lighter.",
-     "Flujo de generación", "Resolución del flujo óptico de generación de cuadros. Menor es más ligero."},
-    {T_MODS, nxopt::TEX, "Texturas HD", "Carrega o pacote de texturas remasterizadas em data/texpack.",
-     "HD textures", "Loads the remastered texture pack from data/texpack.",
-     "Texturas HD", "Carga el paquete de texturas remasterizadas en data/texpack."},
-    {T_MODS, nxopt::HPBARS, "Barras de vida dos inimigos", "Mostra a vida que resta em cada inimigo.",
-     "Enemy health bars", "Shows the health left on each enemy.",
-     "Barras de vida enemigas", "Muestra la vida restante de cada enemigo."},
-    {T_MODS, nxopt::QTE, "QTE automático", "Os comandos rápidos (botões na tela) são feitos sozinhos.",
-     "Auto QTE", "Quick-time events (on-screen buttons) are done for you.",
-     "QTE automático", "Completa automáticamente los eventos rápidos (botones en pantalla)."},
-    {T_CHEATS, nxopt::CH_HP, "Vida infinita", "Kratos não perde vida com ataques de inimigos ou armadilhas.",
-     "Infinite health", "Kratos takes no damage from enemies or traps.",
-     "Vida infinita", "Kratos no recibe daño de enemigos ni trampas."},
-    {T_CHEATS, nxopt::CH_MP, "Magia infinita", "Mantém a barra de magia sempre cheia ao usar os poderes dos deuses.",
-     "Infinite magic", "Keeps the magic bar full when using the gods' powers.",
-     "Magia infinita", "Mantiene llena la barra de magia al usar los poderes divinos."},
-    {T_CHEATS, nxopt::CH_RAGE, "Fúria infinita", "A Fúria dos Deuses / dos Titãs fica ligada sem gastar a barra.",
-     "Infinite rage", "Rage of the Gods / Titans stays on without draining the bar.",
-     "Furia infinita", "La Ira de los Dioses / Titanes permanece activa sin gastarse."},
-    {T_SYS, nxopt::LANG, "Idioma", "Idioma do mod menu e do launcher.", "Language", "Language of the mod menu and launcher.",
-     "Idioma", "Idioma del mod menu y del launcher."},
-    {T_SYS, nxopt::FPS, "Taxa de quadros", "Limite de quadros por segundo. Máximo usa a taxa da tela sem acelerar o jogo.",
-     "Frame rate", "Frames per second cap. Max uses the screen rate without speeding up the game.",
-     "Tasa de cuadros", "Límite de cuadros por segundo. Máximo usa la pantalla sin acelerar el juego."},
-    {T_SYS, nxopt::VSYNC, "VSync", "Sincroniza com a tela para evitar cortes na imagem.",
-     "VSync", "Syncs with the screen to avoid tearing.",
-     "VSync", "Sincroniza con la pantalla para evitar cortes en la imagen."},
-    {T_SYS, nxopt::COUNTER, "Contador de FPS", "Mostra os quadros por segundo no canto da tela.",
-     "FPS counter", "Shows frames per second in the corner of the screen.",
-     "Contador de FPS", "Muestra los cuadros por segundo en la esquina de la pantalla."},
-    {T_SYS, nxopt::GPUDIAG, "Diagnóstico da GPU (log)", "Mede cada desenho da GPU e grava no log. Deixa o jogo bem mais lento.",
-     "GPU diagnostics (log)", "Times every GPU draw and writes it to the log. Makes the game much slower.",
-     "Diagnóstico de GPU (log)", "Mide cada dibujo de la GPU y lo guarda en el log. Hace el juego mucho más lento."},
-    {T_SYS, A_RESET, "Restaurar padrões", "Volta imagem e cor para o padrão (resolução e quadros ficam como estão).",
-     "Restore defaults", "Resets image and color settings (resolution and frame rate stay as they are).",
-     "Restablecer valores", "Restaura imagen y color por defecto (resolución y cuadros se mantienen)."},
-    {T_SYS, A_CLOSE, "Fechar menu", "Volta para o jogo. Também fecha com B ou R + Plus.",
-     "Close menu", "Back to the game. B or R + Plus also closes it.",
-     "Cerrar menú", "Vuelve al juego. También se cierra con B o R + Plus."},
-    {T_SYS, A_LAUNCHER, "Voltar ao launcher", "Fecha o jogo e abre o launcher (gow-nx.nro). Progresso não salvo se perde.",
-     "Return to launcher", "Closes the game and opens the launcher (gow-nx.nro). Unsaved progress is lost.",
-     "Volver al launcher", "Cierra el juego y abre el launcher (gow-nx.nro). El progreso sin guardar se pierde."},
-    {T_SYS, A_EXIT, "Sair do jogo", "Fecha o jogo. O progresso que não foi salvo no jogo se perde.",
-     "Exit game", "Closes the game. Progress not saved in the game is lost.",
-     "Salir del juego", "Cierra el juego. El progreso que no se haya guardado se perderá."},
+    {T_GFX, A_PRESET, "menu.item.preset.name", "menu.item.preset.desc"},
+    {T_GFX, nxopt::RES, "menu.item.res.name", "menu.item.res.desc"},
+    {T_GFX, nxopt::RES_DOCK, "menu.item.res_dock.name", "menu.item.res_dock.desc"},
+    {T_GFX, nxopt::UPSCALE, "menu.item.upscale.name", "menu.item.upscale.desc"},
+    {T_GFX, nxopt::SHARP, "menu.item.sharp.name", "menu.item.sharp.desc"},
+    {T_GFX, nxopt::AA, "menu.item.aa.name", "menu.item.aa.desc"},
+    {T_GFX, nxopt::ANISO, "menu.item.aniso.name", "menu.item.aniso.desc"},
+    {T_GFX, nxopt::GAMMA, "menu.item.gamma.name", "menu.item.gamma.desc"},
+    {T_GFX, nxopt::SAT, "menu.item.sat.name", "menu.item.sat.desc"},
+    {T_GFX, nxopt::VIB, "menu.item.vib.name", "menu.item.vib.desc"},
+    {T_GFX, nxopt::DITHER, "menu.item.dither.name", "menu.item.dither.desc"},
+    {T_GFX, nxopt::FGEN, "menu.item.fgen.name", "menu.item.fgen.desc"},
+    {T_GFX, nxopt::FGFLOW, "menu.item.fgflow.name", "menu.item.fgflow.desc"},
+    {T_MODS, nxopt::TEX, "menu.item.tex.name", "menu.item.tex.desc"},
+    {T_MODS, nxopt::HPBARS, "menu.item.hpbars.name", "menu.item.hpbars.desc"},
+    {T_MODS, nxopt::QTE, "menu.item.qte.name", "menu.item.qte.desc"},
+    {T_CHEATS, nxopt::CH_HP, "menu.item.ch_hp.name", "menu.item.ch_hp.desc"},
+    {T_CHEATS, nxopt::CH_MP, "menu.item.ch_mp.name", "menu.item.ch_mp.desc"},
+    {T_CHEATS, nxopt::CH_RAGE, "menu.item.ch_rage.name", "menu.item.ch_rage.desc"},
+    {T_SYS, nxopt::LANG, "menu.item.lang.name", "menu.item.lang.desc"},
+    {T_SYS, nxopt::FPS, "menu.item.fps.name", "menu.item.fps.desc"},
+    {T_SYS, nxopt::VSYNC, "menu.item.vsync.name", "menu.item.vsync.desc"},
+    {T_SYS, nxopt::COUNTER, "menu.item.counter.name", "menu.item.counter.desc"},
+    {T_SYS, nxopt::GPUDIAG, "menu.item.gpudiag.name", "menu.item.gpudiag.desc"},
+    {T_SYS, A_RESET, "menu.item.reset.name", "menu.item.reset.desc"},
+    {T_SYS, A_CLOSE, "menu.item.close.name", "menu.item.close.desc"},
+    {T_SYS, A_LAUNCHER, "menu.item.launcher.name", "menu.item.launcher.desc"},
+    {T_SYS, A_EXIT, "menu.item.exit.name", "menu.item.exit.desc"},
 };
 constexpr int kN = sizeof kItems / sizeof kItems[0];
 int g_tab = 0;
 
 // presets (os mesmos do launcher): resolução + taxa de quadros
 struct Preset {
-    const char *nome, *nome_en, *nome_es;
+    const char *nome; // chave de tr()
     uint32_t res, fps;
 };
 const Preset kPresets[] = {
-    {"Desempenho", "Performance", "Rendimiento", 6, 2},
-    {"Equilibrado", "Balanced", "Equilibrado", 5, 2},
-    {"Qualidade", "Quality", "Calidad", 2, 1},
+    {"menu.preset.performance", 6, 2},
+    {"menu.preset.balanced", 5, 2},
+    {"menu.preset.quality", 2, 1},
 };
 constexpr int kNPre = 3;
 int preset_atual() {
@@ -263,10 +208,10 @@ std::string val_text(int id, uint32_t v) {
     switch (id) {
     case A_PRESET: {
         const int p = preset_atual();
-        return p >= 0 ? L(kPresets[p].nome, kPresets[p].nome_en, kPresets[p].nome_es) : L("Personalizado", "Custom", "Personalizado");
+        return p >= 0 ? tr(kPresets[p].nome) : tr("menu.preset.custom");
     }
     case nxopt::RES: return kResNome[pos_of(id, v)];
-    case nxopt::RES_DOCK: return v ? kResNome[pos_of(id, v) - 1] : L("Igual ao portátil", "Same as handheld", "Igual al portátil");
+    case nxopt::RES_DOCK: return v ? kResNome[pos_of(id, v) - 1] : tr("menu.val.same_as_handheld");
     case nxopt::SHARP:
         if (!v) return "Off";
         std::snprintf(b, sizeof b, "%u", v);
@@ -279,17 +224,17 @@ std::string val_text(int id, uint32_t v) {
         return b;
     case nxopt::GAMMA:
     case nxopt::SAT:
-        if (v == 4) return L("Padrão", "Default", "Por defecto");
+        if (v == 4) return tr("menu.val.default");
         std::snprintf(b, sizeof b, "%+d", (int)v - 4);
         return b;
     case nxopt::VIB:
         if (!v) return "Off";
         std::snprintf(b, sizeof b, "%u", v);
         return b;
-    case nxopt::LANG: return g_lang == UI_EN ? "English" : g_lang == UI_ES ? "Español" : "Português (BR)";
-    case nxopt::FPS: return v == 3 ? L("Máximo", "Max", "Máximo") : v == 2 ? "60" : "30";
-    case nxopt::FGEN: return v == 2 ? L("Qualidade", "Quality", "Calidad") : v == 1 ? L("Desempenho", "Performance", "Rendimiento") : "Off";
-    case nxopt::FGFLOW: return v == 1 ? L("Inteiro (pesado)", "Full (heavy)", "Completo (pesado)") : v == 2 ? "1/2" : v == 3 ? "1/3" : L("1/4 (leve)", "1/4 (light)", "1/4 (ligero)");
+    case nxopt::LANG: return i18n_name(i18n_find(kLangCode[g_lang])); // "_name" do lang/<código>.ini
+    case nxopt::FPS: return v == 3 ? tr("menu.val.max") : v == 2 ? "60" : "30";
+    case nxopt::FGEN: return v == 2 ? tr("menu.val.quality") : v == 1 ? tr("menu.val.performance") : "Off";
+    case nxopt::FGFLOW: return v == 1 ? tr("menu.val.flow_full") : v == 2 ? "1/2" : v == 3 ? "1/3" : tr("menu.val.flow_quarter");
     default: return v ? "ON" : "OFF";
     }
 }
@@ -310,7 +255,10 @@ int tab_items(int *out) {
 void open() {
     for (int i = 0; i < nxopt::COUNT; i++) g_val[i] = nxopt::get(i);
     if (!g_lang_loaded) {
+        // textos embutidos + data/lang/<código>.ini do SD (mesma pasta de idiomas do launcher)
+        i18n_init((nxp::root_dir() + "/data/lang").c_str());
         g_lang = load_ui_lang();
+        i18n_set(kLangCode[g_lang]);
         g_lang_loaded = true;
     }
     int l[kN];
@@ -362,6 +310,7 @@ void change(int dir) {
     }
     if (id == nxopt::LANG) {
         g_lang = (g_lang + dir + 3) % 3;
+        i18n_set(kLangCode[g_lang]);
         g_val[nxopt::LANG] = (uint32_t)g_lang;
         nxopt::set(nxopt::LANG, (uint32_t)g_lang);
         g_dirty = true;
@@ -692,15 +641,15 @@ void draw(uint32_t screen_h) {
         const int xr = (int)g_w - S(18);
         if (id == A_CLOSE || id == A_RESET || id == A_LAUNCHER || id == A_EXIT) {
             if (!ok) {
-                const char *u = L("Indisponível", "Unavailable", "No disponible");
+                const char *u = tr("menu.unavailable");
                 text(xr - text_w(u, S(13)), base, u, S(13), kDim);
                 text_fit(S(18), base, kItems[i].n(), S(16), tc, (int)g_w - S(150));
                 continue;
             }
-            const char *e = id == A_CLOSE ? L("Fechar", "Close", "Cerrar")
-                          : id == A_LAUNCHER ? L("Launcher", "Launcher", "Launcher")
-                          : id == A_EXIT ? L("Sair", "Exit", "Salir")
-                          : L("Executar", "Run", "Ejecutar");
+            const char *e = id == A_CLOSE ? tr("menu.btn.close")
+                          : id == A_LAUNCHER ? tr("menu.btn.launcher")
+                          : id == A_EXIT ? tr("menu.btn.exit")
+                          : tr("menu.btn.run");
             const int ew = text_w(e, S(13));
             rrect(xr - ew - S(16), y + row / 2 - S(11), ew + S(16), S(22), S(4), kGoldMid, 51);
             text(xr - ew - S(8), base - S(1), e, S(13), kGold);
@@ -708,7 +657,7 @@ void draw(uint32_t screen_h) {
             continue;
         }
         if (id >= 0 && !ok) {
-            const char *u = L("Indisponível", "Unavailable", "No disponible");
+            const char *u = tr("menu.unavailable");
             text(xr - text_w(u, S(13)), base, u, S(13), kDim);
             text_fit(S(18), base, kItems[i].n(), S(16), tc, (int)g_w - S(150));
             continue;
@@ -756,13 +705,13 @@ void draw(uint32_t screen_h) {
     blend(S(18), hy2 - S(26), (int)g_w - S(36), 1, 0xffffffffu, 13);
     int x = S(18);
     x = hint(x, hy2, S(9), "A", true, nullptr, S(14));
-    const char *alt = L("Alterar", "Change", "Cambiar");
+    const char *alt = tr("menu.hint.change");
     text(x, hy2, alt, S(14), 0xffa89f91u);
     x += text_w(alt, S(14)) + S(16);
     x = hint(x, hy2, S(9), "L", false, nullptr, S(14));
     x = hint(x - S(2), hy2, S(9), "R", false, nullptr, S(14));
-    text(x, hy2, L("Abas", "Tabs", "Pestañas"), S(14), 0xffa89f91u);
-    const char *fec = L("Fechar", "Close", "Cerrar");
+    text(x, hy2, tr("menu.hint.tabs"), S(14), 0xffa89f91u);
+    const char *fec = tr("menu.btn.close");
     const int fw = text_w(fec, S(14));
     const int bx = (int)g_w - S(18) - fw - S(24);
     hint(bx, hy2, S(9), "B", true, nullptr, S(14));
@@ -773,26 +722,17 @@ void draw(uint32_t screen_h) {
         const int bw = (int)g_w - S(40), bh = S(230), bx2 = S(20), by = ((int)g_h - bh) / 2;
         rrect(bx2, by, bw, bh, S(10), 0xff1c1712u, 255);
         blend(bx2, by, bw, S(2), kGold, 255);
-        const char *l2pt[] = {"AVISO", "O diagnóstico mede cada desenho da GPU", "e deixa o jogo bem mais lento.",
-                              "Use só para gravar um log e depois desligue."};
-        const char *l2en[] = {"WARNING", "Diagnostics time every GPU draw", "and make the game much slower.",
-                              "Use it only to record a log, then turn it off."};
-        const char *l2es[] = {"AVISO", "El diagnóstico mide cada dibujo de la GPU", "y hace el juego mucho más lento.",
-                              "Úsalo solo para grabar un log y desactívalo."};
-        const char *l3pt[] = {"SAIR DO JOGO", "O jogo vai fechar agora.", "O progresso que não foi salvo no jogo", "será perdido."};
-        const char *l3en[] = {"EXIT GAME", "The game will close now.", "Progress not saved in the game", "will be lost."};
-        const char *l3es[] = {"SALIR DEL JUEGO", "El juego se cerrará ahora.", "El progreso que no se haya guardado", "se perderá."};
-        const char *l4pt[] = {"VOLTAR AO LAUNCHER", "O jogo vai fechar e abrir o launcher.", "O progresso que não foi salvo no jogo", "será perdido."};
-        const char *l4en[] = {"RETURN TO LAUNCHER", "The game will close and open the launcher.", "Progress not saved in the game", "will be lost."};
-        const char *l4es[] = {"VOLVER AL LAUNCHER", "El juego se cerrará y abrirá el launcher.", "El progreso que no se haya guardado", "se perderá."};
-        const char *const *l2 = g_confirm == 3 ? (g_lang == UI_EN ? l4en : g_lang == UI_ES ? l4es : l4pt)
-                              : g_confirm == 2 ? (g_lang == UI_EN ? l3en : g_lang == UI_ES ? l3es : l3pt)
-                                               : (g_lang == UI_EN ? l2en : g_lang == UI_ES ? l2es : l2pt);
-        text(bx2 + (bw - text_w(l2[0], S(24))) / 2, by + S(44), l2[0], S(24), kGold);
-        for (int i = 1; i < 4; i++) text(bx2 + (bw - text_w(l2[i], S(16))) / 2, by + S(64) + S(28) * i, l2[i], S(16), kWhite);
-        const char *b = g_confirm == 3 ? L("A: voltar ao launcher     B: cancelar", "A: launcher     B: cancel", "A: volver al launcher     B: cancelar")
-                      : g_confirm == 2 ? L("A: sair     B: cancelar", "A: exit     B: cancel", "A: salir     B: cancelar")
-                                       : L("A: ligar mesmo assim     B: cancelar", "A: turn on anyway     B: cancel", "A: activar igualmente     B: cancelar");
+        static const char *const kConfirm[3][4] = {
+            {"menu.confirm.gpu_diag.title", "menu.confirm.gpu_diag.line1", "menu.confirm.gpu_diag.line2", "menu.confirm.gpu_diag.line3"},
+            {"menu.confirm.exit.title", "menu.confirm.exit.line1", "menu.confirm.exit.line2", "menu.confirm.exit.line3"},
+            {"menu.confirm.launcher.title", "menu.confirm.launcher.line1", "menu.confirm.launcher.line2", "menu.confirm.launcher.line3"},
+        };
+        const char *const *l2 = kConfirm[g_confirm == 3 ? 2 : g_confirm == 2 ? 1 : 0];
+        text(bx2 + (bw - text_w(tr(l2[0]), S(24))) / 2, by + S(44), tr(l2[0]), S(24), kGold);
+        for (int i = 1; i < 4; i++) text(bx2 + (bw - text_w(tr(l2[i]), S(16))) / 2, by + S(64) + S(28) * i, tr(l2[i]), S(16), kWhite);
+        const char *b = g_confirm == 3 ? tr("menu.confirm.launcher.buttons")
+                      : g_confirm == 2 ? tr("menu.confirm.exit.buttons")
+                                       : tr("menu.confirm.gpu_diag.buttons");
         text(bx2 + (bw - text_w(b, S(16))) / 2, by + bh - S(22), b, S(16), kGrey);
     }
 }

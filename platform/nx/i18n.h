@@ -31,7 +31,9 @@ int i18n_set(const char *code);
 const char *i18n_current(void);
 
 // Texto da chave no idioma ativo, com recuo para o inglês e depois para a própria chave. Nunca devolve NULL.
-const char *tr(const char *key);
+const char *i18n_tr(const char *key);
+// Atalho local (static inline) para não exportar um símbolo global "tr" junto do código do jogo.
+static inline const char *tr(const char *key) { return i18n_tr(key); }
 
 // Para testes: carrega um idioma a partir de um texto em memória, como se fosse um arquivo do SD.
 int i18n_add_text(const char *code, const char *text, size_t len);

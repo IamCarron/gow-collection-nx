@@ -271,7 +271,7 @@ int i18n_set(const char *code) {
 
 const char *i18n_current(void) { return cur >= 0 ? langs[cur].code : "en"; }
 
-const char *tr(const char *key) {
+const char *i18n_tr(const char *key) {
     const char *v = lookup(cur, key);
     if (!v && cur != base) v = lookup(base, key);
     return v ? v : key;
