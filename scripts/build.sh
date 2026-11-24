@@ -2,6 +2,7 @@
 # Monta build/<jogo>.nro: runtime vitart portado (build/src), libatrac9, volk, NVK e os módulos do jogo em build/mod.
 #   VITART=/caminho/do/vitaRT GAME=gow1 bash scripts/build.sh
 #   VITART=/caminho/do/vitaRT GAME=gow2 bash scripts/build.sh
+# Precisa do switch-deko3d (pacote do devkitPro).
 # Variáveis: DEVKITPRO (padrão /opt/devkitpro), VULKAN_INCLUDE (headers do Vulkan com Volk/), JOBS.
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -14,7 +15,7 @@ GAME=${GAME:-gow1}
 O=$ROOT/build/obj_$GAME
 GDEF=""; [ "$GAME" = gow2 ] && GDEF="-DGOW_GAME_GOW2"
 TITLE="God of War"; [ "$GAME" = gow2 ] && TITLE="God of War II"
-VERSION=${VERSION:-1.3}
+VERSION=${VERSION:-1.4}
 JOBS=${JOBS:-8}
 [ -d "$S/nx" ] || { echo "rode scripts/setup.sh antes"; exit 1; }
 for m in $GAME libc libfios2; do [ -f "$ROOT/build/mod/$m.o" ] || { echo "falta build/mod/$m.o (scripts/compile_mods.sh)"; exit 1; }; done
@@ -26,6 +27,9 @@ COMMON="$ARCH -O3 -g0 -fno-omit-frame-pointer -w -ffunction-sections -fdata-sect
  -I$TP/libatrac9/src -I$TP/stb -I$VK -I$VK/Volk"
 CXXFLAGS="$COMMON -std=gnu++20 -fexceptions -frtti -include $S/nx/nx_compat.h"
 CFLAGS="$COMMON -std=gnu11"
+# Geração de quadros (opcional): LSFG=/caminho/do/lsfg-deko3d e LSFG_GEN=pasta com os cabeçalhos gerados no preparo dos shaders (não inclusa).
+LSFG=${LSFG:-}; LSFG_GEN=${LSFG_GEN:-}
+[ -n "$LSFG" ] && [ -d "$LSFG/src" ] && CXXFLAGS="$CXXFLAGS -DVITART_LSFG -I$LSFG/include -I$LSFG_GEN"
 
 compile() { # fonte objeto
     local src=$1 obj=$2
@@ -47,6 +51,16 @@ for f in $SRCS; do
     compile "$f" "$o" &
     while [ "$(jobs -r | wc -l)" -ge "$JOBS" ]; do sleep 0.1; done
 done
+# lsfg-deko3d (GPL-3.0-or-later): só a parte de execução. Sem LSFG o frame gen fica fora.
+if [ -n "$LSFG" ] && [ -d "$LSFG/src" ]; then
+    LSFGFLAGS="$COMMON -std=gnu++20 -fexceptions -I$LSFG/include -I$LSFG_GEN"
+    for s in binding cache_format cache_load cache_store dksh error image_graph layout pe_resources schedule sha256 shader_set spirv_module; do
+        o=$O/lsfg_$s.o; OBJS="$OBJS $o"
+        if ! [ "$o" -nt "$LSFG/src/$s.cpp" ]; then
+            ( "$B/aarch64-none-elf-g++" $LSFGFLAGS -c "$LSFG/src/$s.cpp" -o "$o" && echo "  lsfg $s" ) &
+        fi
+    done
+fi
 for j in $(jobs -p); do wait "$j" || fail=1; done
 [ $fail = 0 ] || { echo "falhou a compilação"; exit 1; }
 
@@ -55,7 +69,7 @@ echo "== ligando $GAME.elf"
     -o "$ROOT/build/$GAME.elf" $OBJS "$ROOT/build/mod/$GAME.o" "$ROOT/build/mod/libc.o" "$ROOT/build/mod/libfios2.o" \
     -L"$DKP/portlibs/switch/lib" -L"$DKP/libnx/lib" \
     -Wl,--whole-archive -lnvk -Wl,--no-whole-archive -Wl,--start-group -lnvk_support -lavformat -lavcodec -lswresample -lavutil -ldav1d -lfreetype -lharfbuzz -lbz2 -lpng16 -lz -lexpat -Wl,--end-group \
-    -Wl,--wrap=fsFsOpenFile,--wrap=fsFsOpenDirectory,--wrap=fsFsCreateFile,--wrap=fsFsCreateDirectory,--wrap=fsFsGetEntryType -Wl,-u,vk_icdGetInstanceProcAddr -lnx -lm
+    -Wl,--wrap=fsFsOpenFile,--wrap=fsFsOpenDirectory,--wrap=fsFsCreateFile,--wrap=fsFsCreateDirectory,--wrap=fsFsGetEntryType -Wl,-u,vk_icdGetInstanceProcAddr ${DEKO3D_LIB:--ldeko3d} -lnx -lm
 
 echo "== $GAME.nro"
 "$DKP/tools/bin/nacptool" --create "$TITLE" "Guto Recomp" "$VERSION" "$ROOT/build/$GAME.nacp"

@@ -18,6 +18,7 @@ void dump_fs_ops(bool recent);       // operações no SD pendentes e as última
 void set_clocks(); // CPU e GPU no máximo do modo (clkrst)
 void log_clocks(); // relógios atuais no log
 void gpu_720p(bool on); // GPU 460,8 MHz com 720p no portátil (a cada quadro; só age quando muda)
+bool docked(); // na base (TV)
 // Base da janela do guest: guest_window() + endereço do Vita (0x80000000..0xC0000000) é memória válida.
 uint8_t *guest_window();
 uint8_t *g_window_base(); // a mesma base, sem alocar (nullptr antes do guest_window)

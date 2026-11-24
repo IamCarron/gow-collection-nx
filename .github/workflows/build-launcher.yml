@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version string embedded in gow-nx.nro (defaults to 1.3 or tag)'
+        description: 'Version string embedded in gow-nx.nro (defaults to 1.4 or tag)'
         required: false
         default: ''
       publish_release:
@@ -35,7 +35,7 @@ jobs:
         run: |
           dkp-pacman -Sy --noconfirm --needed \
             switch-freetype switch-harfbuzz switch-bzip2 switch-libpng \
-            switch-zlib switch-mpg123 switch-curl switch-mbedtls
+            switch-zlib switch-libwebp switch-mpg123 switch-curl switch-mbedtls
 
       - name: Build launcher
         env:
@@ -48,7 +48,7 @@ jobs:
           elif [ "$REF_TYPE" = "tag" ]; then
             VER="${REF_NAME#v}"
           else
-            VER="1.3"
+            VER="1.4"
           fi
           VERSION="$VER" bash launcher/build.sh
           sha256sum build/gow-nx.nro > build/gow-nx.nro.sha256

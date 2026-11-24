@@ -10,11 +10,13 @@ bool input_blocked(); // aberto, ou fechado há pouco com botões ainda apertado
 void update();        // a cada apresentação (thread Render): lê o controle, abre/fecha e navega
 // Painel em BGRA para uma tela de altura screen_h; dirty = mudou desde a última chamada.
 bool panel(uint32_t screen_h, const uint32_t *&px, uint32_t &w, uint32_t &h, bool &dirty);
+uint32_t panel_x(uint32_t screen_h); // x do painel na tela (encostado à esquerda; y = mesma margem)
 } // namespace nxmenu
 
 // Ponte com as opções (game_options.cpp)
 namespace nxopt {
-enum Id : int { RES, DRS, SHARP, FPS, VSYNC, COUNTER, TEX, QTE, HPBARS, CH_HP, CH_MP, CH_RAGE, COUNT };
+enum Id : int { RES, DRS, SHARP, FPS, VSYNC, COUNTER, TEX, QTE, HPBARS, CH_HP, CH_MP, CH_RAGE, FGEN, GPUDIAG, FGFLOW,
+              RES_DOCK, AA, UPSCALE, ANISO, GAMMA, SAT, VIB, DITHER, LANG, COUNT };
 uint32_t get(int id);
 void set(int id, uint32_t v);
 bool available(int id);

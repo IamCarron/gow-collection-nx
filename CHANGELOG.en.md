@@ -2,6 +2,58 @@
 
 [Português](CHANGELOG.md) · **English**
 
+## v1.4-nx
+
+The biggest update since launch: a **native deko3d renderer**, a **redesigned launcher and mod menu**, new image
+options, a trophy system, a built-in updater and **English and Portuguese** support.
+
+### Performance
+- **deko3d renderer** (the Switch GPU's native API) as the main path, with less CPU overhead than Vulkan. Vulkan is
+  still available under *Options → Image → Renderer*.
+- **GPU at 460.8 MHz in handheld mode**: the game uses the official handheld performance profile (the same one
+  retail games use; not an overclock) and keeps it for the whole session. Docked, the system stays at 768 MHz.
+- **Frame generation (LSFG)** in *God of War I* with deko3d: creates in-between frames for 60 fps on screen with the
+  game at 30. The adjustable optical flow (full, 1/2, 1/3, 1/4) scales the cost with resolution, falls back
+  automatically when a flow size doesn't fit the chosen resolution, and pauses automatically when the GPU can't keep up.
+- At 720p handheld, FSR skips the upscale pass (it is already close to 1x) and only sharpens, saving GPU time.
+
+### Image
+- **AMD FSR 1.0** (EASU + RCAS) upscaler, with sharpness from 0 to 10.
+- **FXAA**, **anisotropic filtering** (up to 16x), **brightness**, **saturation**, **vibrance** and **debanding**.
+- **Separate TV resolution**: one resolution for handheld and another for docked, switched automatically.
+- **Quick presets** (Performance, Balanced, Quality) in the launcher and the mod menu.
+
+### Redesigned launcher
+- New look: cards with each game's cover, a panel with save, trophies and installed extras (HD textures, HD videos),
+  background music and the last game played.
+- **Tabbed options** (Image, Color, Performance, Game), with a description and default for every item; everything
+  applies to both games.
+- **Trophies**: the full list for each game, with progress, points, filters (all, earned, missing) and spoiler-safe
+  hidden trophies.
+- **Built-in updater**: the launcher checks GitHub for new versions and installs the launcher, *God of War* and
+  *God of War II* in one go, keeping saves, options, videos and textures.
+
+### Redesigned mod menu (R + Plus)
+- New tabbed panel (**Graphics, Mods, Cheats, System**) with toggles, level bars and a description for every option.
+- All new image and performance options change while the game runs, no restart needed.
+- **Cheats**: infinite health, magic and rage. **Mods**: HD textures, enemy health bars and auto QTE.
+- GPU diagnostics for performance logs, with a warning before it turns on.
+
+### Languages
+- **English and Portuguese (Brazil)** in the launcher and the mod menu. Pick it under *Options → Game → Language* or
+  *System → Language* in R + Plus; it applies to both.
+
+### Fixes
+- Diagonal analog movement no longer slows Kratos down.
+- HD videos open correctly on Switch.
+- HD textures use a fixed decode queue and a smaller cache (less memory, fewer stutters).
+- Threads are reused and memory is checked before scanning (#8).
+- Black screen with FSR 1.0 fixed.
+- Frame generation not starting at some resolutions fixed; VSync wait time no longer counts as GPU load.
+- Unexpected exits (abort, unhandled C++ error) now close the game cleanly and log the reason, instead of hitting the
+  Atmosphère error screen (2168-0001).
+- The updater installs the `gow-nx.zip` package (launcher + both games) and no longer keeps offering the same version.
+
 ## v1.3-nx
 
 Fixes and a new launcher. Thanks to **[mvhoang92](https://github.com/mvhoang92)** for the console testing and the

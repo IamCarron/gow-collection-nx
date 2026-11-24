@@ -21,6 +21,10 @@ statically linked into the resulting NROs. Each keeps its own license.
 | volk | https://github.com/zeux/volk | MIT |
 | LibAtrac9 | https://github.com/Thealexbarney/LibAtrac9 | MIT |
 | stb | https://github.com/nothings/stb | MIT / Public Domain |
+| deko3d | https://github.com/devkitPro/deko3d | zlib License |
+| AMD FidelityFX Super Resolution 1.0 (EASU/RCAS shaders) | https://github.com/GPUOpen-Effects/FidelityFX-FSR | MIT |
+| libwebp | https://chromium.googlesource.com/webm/libwebp | BSD-3-Clause |
+| lsfg-deko3d (optional, frame generation) | Cemu-nx `third_party/lsfg-deko3d` | GPL-3.0-or-later |
 | mpg123 | https://www.mpg123.de/ | LGPL-2.1 |
 | FreeType | https://freetype.org/ | FreeType License (FTL) |
 | HarfBuzz | https://github.com/harfbuzz/harfbuzz | MIT ("Old MIT") |
@@ -42,3 +46,11 @@ above, and the launcher can be relinked against a modified mpg123 using `launche
 
 *God of War*, *God of War II* and all related assets belong to Sony Interactive Entertainment. None of them are
 distributed here.
+
+**stb_image** (`launcher/stb_image.h`) is vendored unmodified so the launcher builds in CI.
+
+**lsfg-deko3d (GPL-3.0-or-later)** is not in this repository. `scripts/build.sh` links it only when `LSFG` points to
+a checkout; an NRO built that way includes GPL code and is distributed under GPL-3.0-or-later terms, with the
+corresponding source being this repository plus lsfg-deko3d. No shaders from Lossless Scaling are included: each user
+extracts them from their own copy of `Lossless.dll`.
+

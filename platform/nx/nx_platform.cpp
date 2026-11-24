@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
+#include <csignal>
+#include <exception>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -38,7 +40,31 @@ constexpr uint64_t kGuestLo = 0x80000000ull;
 constexpr uint64_t kGuestHi = 0xC0000000ull; // faixas do vitart: módulos em 0x81..., alocadores até 0xC0000000
 } // namespace
 
+// Saídas que não passam pelo hard_exit (abort, exit, exceção C++ sem catch) voltam ao hbloader, que descarrega o NRO
+// com as outras threads ainda rodando: a próxima que acordar cai em código desmapeado (Instruction Abort, 2168-0001)
+// e nem o tratador de exceções roda. Aqui elas viram hard_exit, que grava o motivo no log e encerra o processo.
+[[noreturn]] void hard_exit(int code);
+static void saida_inesperada(const char *por, int code) {
+    vt::logf("nx: saída inesperada: %s", por);
+    hard_exit(code);
+}
+static void instalar_saidas() {
+    std::set_terminate([] {
+        const char *what = "exceção desconhecida";
+        static char buf[200];
+        if (std::exception_ptr e = std::current_exception()) {
+            try { std::rethrow_exception(e); }
+            catch (const std::exception &x) { std::snprintf(buf, sizeof buf, "exceção C++ sem tratamento: %s", x.what()), what = buf; }
+            catch (...) {}
+        } else what = "std::terminate";
+        saida_inesperada(what, 134);
+    });
+    std::signal(SIGABRT, [](int) { saida_inesperada("abort()", 134); });
+    std::atexit([] { saida_inesperada("exit() fora do hard_exit", 1); });
+}
+
 void init() {
+    instalar_saidas();
     // NVK (Mesa): sem cache de shaders em disco (pediria usuário/HOME) e sem cache de pipelines do Mesa.
     setenv("MESA_SHADER_CACHE_DISABLE", "true", 1);
     setenv("MESA_GLSL_CACHE_DISABLE", "true", 1);
@@ -68,6 +94,7 @@ void init() {
 
 // Relógios de fábrica: o NRO não mexe em CPU/GPU/memória (nada de overclock); só registra os valores do sistema.
 void log_clocks();
+static u32 g_reaplicado = 0; // vezes que o sistema baixou a GPU e o jogo subiu de novo
 void set_clocks() {
     vt::logf("nx: relógios de fábrica (sem overclock)");
     log_clocks();
@@ -83,8 +110,9 @@ void log_clocks() {
         return hz / 1000000;
     };
     const u32 cpu = get(PcvModuleId_CpuBus), gpu = get(PcvModuleId_GPU), emc = get(PcvModuleId_EMC);
-    clkrstExit();
-    vt::logf("nx: relógios agora: CPU %u MHz, GPU %u MHz, memória %u MHz", cpu, gpu, emc);
+    clkrstExit(); // contado por referência: a sessão aberta por gpu_720p continua valendo
+    vt::logf("nx: relógios agora: CPU %u MHz, GPU %u MHz, memória %u MHz (GPU reaplicada %u vezes)", cpu, gpu, emc,
+             g_reaplicado);
 }
 
 // GPU 460,8 MHz (perfil oficial do portátil, não é overclock) só com a resolução 720p no modo portátil.
@@ -102,21 +130,49 @@ static Result gpu_set(u32 hz) {
     if (R_SUCCEEDED(rc)) rc = clkrstSetClockRate(&s, hz), clkrstCloseSession(&s);
     return rc;
 }
-// Confere a cada ~2 s (120 quadros): se o sistema ou outro programa baixou a GPU, aplica de novo.
+bool docked() { return appletGetOperationMode() == AppletOperationMode_Console; }
+// Perfis oficiais do apm (modo Normal = portátil): 0x92220007 = CPU 1020 / GPU 307,2 / mem 1331,
+// 0x92220008 = CPU 1020 / GPU 460,8 / mem 1331. Com o perfil o sistema para de devolver a GPU a 307 MHz;
+// o clkrst fica como reforço (o sistema reaplicava o perfil dele e derrubava o clkrst a cada poucos segundos).
+static constexpr u32 kPerf307 = 0x92220007u, kPerf460 = 0x92220008u;
+static bool g_apm_ok = false, g_apm_mexeu = false, g_clk_ok = false;
+static void apm_perfil(bool alto) {
+    if (!g_apm_ok) {
+        const Result rc = apmInitialize();
+        g_apm_ok = R_SUCCEEDED(rc);
+        if (!g_apm_ok) {
+            static int n = 0;
+            if (n++ < 2) vt::logf("nx: apm indisponível (rc 0x%x); só clkrst", rc);
+            return;
+        }
+    }
+    u32 antes = 0;
+    apmGetPerformanceConfiguration(ApmPerformanceMode_Normal, &antes);
+    const Result rc = apmSetPerformanceConfiguration(ApmPerformanceMode_Normal, alto ? kPerf460 : kPerf307);
+    u32 depois = 0;
+    apmGetPerformanceConfiguration(ApmPerformanceMode_Normal, &depois);
+    if (R_SUCCEEDED(rc)) g_apm_mexeu = alto;
+    vt::logf("nx: apm portátil: perfil 0x%x -> 0x%x (rc 0x%x)", antes, depois, rc);
+}
+// Chamado a cada quadro; confere a GPU a cada 15 quadros (~0,25 s) e aplica de novo se o sistema baixou.
 void gpu_720p(bool on) {
     static int ultimo = -1;
     static uint32_t quadros = 0;
     static int erros = 0;
     const bool portatil = appletGetOperationMode() == AppletOperationMode_Handheld;
     const int estado = (on ? 1 : 0) | (portatil ? 2 : 0);
-    const bool conferir = on && portatil && ++quadros >= 120;
+    const bool conferir = on && portatil && ++quadros >= 15;
     if (estado == ultimo && !conferir) return;
     if (conferir) quadros = 0;
     const bool mudou = estado != ultimo;
     ultimo = estado;
-    if (R_FAILED(clkrstInitialize())) {
-        if (erros++ < 3) vt::logf("nx: clkrst indisponível");
-        return;
+    if (mudou && on) apm_perfil(true); // vale só para o modo portátil; na base o sistema segue em 768 MHz
+    if (!g_clk_ok) {
+        if (R_FAILED(clkrstInitialize())) {
+            if (erros++ < 3) vt::logf("nx: clkrst indisponível");
+            return;
+        }
+        g_clk_ok = true;
     }
     const u32 agora = gpu_rate();
     if (on && portatil) {
@@ -124,23 +180,22 @@ void gpu_720p(bool on) {
             if (!g_gpu_antes) g_gpu_antes = agora;
             const Result rc = gpu_set(460800000u);
             const u32 depois = gpu_rate();
-            if (mudou || erros < 5) {
-                vt::logf("nx: 720p no portátil: GPU %u -> %u MHz (rc 0x%x)%s", agora / 1000000, depois / 1000000, rc,
+            if (!mudou) ++g_reaplicado;
+            if (mudou || g_reaplicado <= 3 || g_reaplicado % 100 == 0)
+                vt::logf("nx: portátil: GPU %u -> %u MHz (rc 0x%x)%s", agora / 1000000, depois / 1000000, rc,
                          mudou ? "" : " [reaplicado]");
-                if (!mudou) erros++;
-            }
-        } else if (mudou) vt::logf("nx: 720p no portátil: GPU já em %u MHz", agora / 1000000);
+        } else if (mudou) vt::logf("nx: portátil: GPU já em %u MHz", agora / 1000000);
     } else if (g_gpu_antes) {
         // no dock o sistema troca o perfil sozinho (768 MHz); no portátil volta ao valor de antes
         if (portatil) gpu_set(g_gpu_antes);
         vt::logf("nx: GPU de volta a %u MHz", gpu_rate() / 1000000);
         g_gpu_antes = 0;
     }
-    clkrstExit();
 }
 static void gpu_restaurar() {
+    if (g_apm_mexeu) apmSetPerformanceConfiguration(ApmPerformanceMode_Normal, kPerf307);
     if (!g_gpu_antes || appletGetOperationMode() != AppletOperationMode_Handheld) return;
-    if (R_SUCCEEDED(clkrstInitialize())) gpu_set(g_gpu_antes), clkrstExit();
+    if (g_clk_ok || R_SUCCEEDED(clkrstInitialize())) gpu_set(g_gpu_antes);
 }
 
 uint8_t *guest_window() {
@@ -259,7 +314,7 @@ void apply_thread_profile(Handle me, const std::string &name, s32 base_prio) {
     if (!pin) svcSetThreadCoreMask(me, (s32)(g_next_core++ % 3), 0x7);
     else if (name == "main") svcSetThreadCoreMask(me, 0, 0x1), prio = 0x2A;
     else if (name == "Render") svcSetThreadCoreMask(me, 1, 0x2), prio = 0x2A;
-    else if (name == "gravacao vk") svcSetThreadCoreMask(me, 2, 0x4), prio = 0x2B;
+    else if (name == "gravacao vk" || name == "copia dk") svcSetThreadCoreMask(me, 2, 0x4), prio = 0x2B;
     // Som: dorme quase sempre e acorda a cada poucos ms com prazo curto; acima de todas para não engasgar quando a
     // gravação Vulkan (núcleo 2, 0x2B) está ocupada.
     else if (name == "audio" || name == "audio_out_thread" || name == "SndStreamThread")
