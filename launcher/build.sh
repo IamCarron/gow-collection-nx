@@ -36,8 +36,8 @@ else
     echo "aviso: switch-curl não encontrado em $PL; compilando sem o atualizador"
 fi
 
-"$B/aarch64-none-elf-gcc" "${CFLAGS[@]}" -c "$ROOT/launcher/main.c" -o "$O/main.o"
 "$B/aarch64-none-elf-gcc" "${CFLAGS[@]}" -c "$ROOT/launcher/trophies.c" -o "$O/trophies.o"
+"$B/aarch64-none-elf-gcc" "${CFLAGS[@]}" -c "$ROOT/launcher/main.c" -o "$O/main.o"
 "$B/aarch64-none-elf-gcc" -specs="$DKP/libnx/switch.specs" "${ARCH[@]}" -o "$O/gow-nx.elf" "${OBJS[@]}" -L"$PL/lib" -L"$DKP/libnx/lib" \
     "${CURL_LIBS[@]}" -lwebp -lfreetype -lharfbuzz -lfreetype -lbz2 -lpng16 -lz -lmpg123 -lnx -lm
 "$DKP/tools/bin/nacptool" --create "God of War Collection" "Guto Recomp" "$VERSION" "$O/gow-nx.nacp"
