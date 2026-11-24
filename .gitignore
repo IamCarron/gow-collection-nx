@@ -29,3 +29,10 @@ res/
 *.antes_*
 *.orig
 *.rej
+
+# lsfg_prep: binário e cache derivados do Lossless.dll de cada um: NUNCA versionar
+tools/lsfg_prep/obj/
+tools/lsfg_prep/out/
+tools/lsfg_prep/*.exe
+lsfg/
+*.dll

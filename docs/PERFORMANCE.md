@@ -1,11 +1,11 @@
 # Desempenho
 
-Meta: **30 fps no relógio padrão do Switch** (CPU 1020 MHz, sem overclock).
+Meta: **30 fps sem overclock** (CPU 1020 MHz), e **60 na tela** com a geração de quadros.
 
-| Resolução interna | Requisito |
-|---|---|
-| 1x | relógios padrão, **sem overclock** |
-| 2x | **GPU a 614 MHz** |
+| Versão | Relógios no portátil | Observação |
+|---|---|---|
+| até v1.3 | CPU 1020, GPU 307 MHz | 2x pedia a GPU a 614 MHz (sys-clk) |
+| **v1.4** | CPU 1020, **GPU 460,8 MHz**, memória 1331 MHz | perfil oficial de desempenho do portátil, pedido pelo próprio port |
 
 ## Resultado (God of War II, Switch real, portátil, CPU 1020 MHz)
 
@@ -28,6 +28,30 @@ Com isso, as threads `main` e `Render` passam a maior parte do quadro esperando:
 
 Tempo de GPU fora dos passes por quadro: cópia da profundidade 2,1 → 0,3 ms; cópia da própria cena 1,2 → 0,65 ms.
 O log `vk: GPU por alvo` mostra cada segmento.
+
+## v1.4 — deko3d, GPU a 460 MHz, FSR e geração de quadros (God of War, portátil)
+
+| Mudança | Efeito |
+|---|---|
+| Renderizador **deko3d** (`renderer=deko3d`) | GXM gravado direto na API nativa da GPU, sem a camada Vulkan/NVK; shaders DKSH prontos no `shaders_dk.pak` (nada compila no console) |
+| Perfil de desempenho do portátil (`apm`, 0x92220008) | GPU de 307,2 → **460,8 MHz**, mantida a partida toda; na base continua 768 MHz |
+| FSR 1.0 em 720p | EASU pulado quando a escala é ~1x: só o RCAS roda |
+| Geração de quadros (lsfg-deko3d) | **30 quadros reais → 60 na tela** |
+
+Números do log do *God of War* em 1271x720, FSR, geração de quadros em Desempenho com fluxo 1/2:
+
+| Medida | Valor |
+|---|---|
+| Quadros reais | 30 fps |
+| Quadros na tela | 60 fps |
+| GPU na cena | ~9–10 ms |
+| GPU na geração | ~9,5–10 ms |
+| GPU | 460,8 MHz a partida toda |
+
+A geração tem um orçamento de 33,3 ms por quadro real: passando de 32 ms ela pausa por 5 s e só volta se o jogo mais o
+último custo medido da geração couberem em 30 ms. Um fluxo que o plano recusa na resolução atual é trocado pelo fluxo
+maior seguinte (`dk: fluxo 1/N não serve em WxH`). A opção **Diagnóstico da GPU** do mod menu grava no
+log o tempo de cada passada.
 
 ## Threads
 

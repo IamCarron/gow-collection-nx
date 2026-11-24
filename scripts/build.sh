@@ -27,7 +27,7 @@ COMMON="$ARCH -O3 -g0 -fno-omit-frame-pointer -w -ffunction-sections -fdata-sect
  -I$TP/libatrac9/src -I$TP/stb -I$VK -I$VK/Volk"
 CXXFLAGS="$COMMON -std=gnu++20 -fexceptions -frtti -include $S/nx/nx_compat.h"
 CFLAGS="$COMMON -std=gnu11"
-# Geração de quadros (opcional): LSFG=/caminho/do/lsfg-deko3d e LSFG_GEN=pasta com os cabeçalhos gerados no preparo dos shaders (não inclusa).
+# Geração de quadros (opcional): LSFG=/caminho/do/lsfg-deko3d e LSFG_GEN=tools/lsfg_prep/gen (cabeçalho de versão, o mesmo do preparo dos shaders).
 LSFG=${LSFG:-}; LSFG_GEN=${LSFG_GEN:-}
 [ -n "$LSFG" ] && [ -d "$LSFG/src" ] && CXXFLAGS="$CXXFLAGS -DVITART_LSFG -I$LSFG/include -I$LSFG_GEN"
 

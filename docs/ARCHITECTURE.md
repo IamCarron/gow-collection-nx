@@ -35,7 +35,7 @@ As chamadas ao sistema do Vita são reimplementadas em C++ pelo runtime:
 - **E/S**: `sceIo*` e `fios2` mapeados para `sdmc:/switch/gow-nx/game/PCSA00126`.
 - **Áudio**: ATRAC9 decodificado com LibAtrac9 e mixado para `audout`.
 - **Entrada**: `sceCtrl` lido do `PadState` do libnx.
-- **GPU**: `sceGxm*` traduzido para Vulkan.
+- **GPU**: `sceGxm*` traduzido para deko3d ou Vulkan (opção `renderer=`).
 
 ## GXM → Vulkan
 
@@ -46,6 +46,18 @@ demanda e mantidos em cache.
 
 No `present()` o runtime solta a trava global enquanto espera a cerca e o `vkAcquireNextImageKHR`, para que a lógica
 do jogo continue rodando durante o vsync. O driver é o NVK (Mesa) ligado estaticamente.
+
+## GXM → deko3d
+
+Desde a v1.4 há um segundo renderizador (`gxm_dk.cpp`), que grava as mesmas operações direto na API nativa da GPU do
+Switch. Os shaders não são compilados no console: o `tools/pack_shaders_dk.py` converte cada SPIR-V do `shaders.pak`
+para DKSH no PC (SPIRV-Cross → GLSL → `uam`) e o `shaders_dk.pak` guarda os binários pela chave FNV-1a 64 do SPIR-V,
+que o renderizador recalcula ao criar cada programa.
+
+Depois da cena vêm as passadas de pós-processamento, na ordem: FXAA na resolução interna, ampliação (bilinear ou FSR
+1.0 EASU, pulado quando a escala é ~1x), RCAS e ajustes de cor (brilho, saturação, vibrância, debanding). A geração de
+quadros (lsfg-deko3d, só no *God of War*) roda como passadas de compute sobre os dois últimos quadros reais e
+apresenta o quadro intermediário entre eles; o cache de shaders dela é preparado no PC pelo `tools/lsfg_prep`.
 
 ## Camada do Switch (`platform/nx`)
 

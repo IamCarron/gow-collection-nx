@@ -54,3 +54,8 @@ a checkout; an NRO built that way includes GPL code and is distributed under GPL
 corresponding source being this repository plus lsfg-deko3d. No shaders from Lossless Scaling are included: each user
 extracts them from their own copy of `Lossless.dll`.
 
+
+**`tools/lsfg_prep/`** (the PC tool that builds the frame generation shader cache) links against lsfg-deko3d and
+SPIRV-Cross, so its sources (`main.cpp`, `compile_uam_cli.cpp`) are **GPL-3.0-or-later**, as marked in their SPDX
+headers; the rest of the repository stays MIT. Its output (`out/`, the SD card's `lsfg/` folder) is derived from
+`Lossless.dll` and must not be committed or shared; `.gitignore` blocks it.
