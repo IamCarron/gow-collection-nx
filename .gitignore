@@ -34,5 +34,6 @@ res/
 tools/lsfg_prep/obj/
 tools/lsfg_prep/out/
 tools/lsfg_prep/*.exe
-lsfg/
+/lsfg/
 *.dll
+!tools/lsfg_prep/gen/
