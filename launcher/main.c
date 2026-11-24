@@ -1,8 +1,8 @@
 // Launcher do gow-nx ("God of War Collection"): dois cards com a capa de cada jogo, painel com save/troféus/extras,
 // perfil rápido (presets com L/R) e a tela de opções com tudo do menu R + Plus, em abas. Encadeia o NRO escolhido
 // (mesma pasta) via hbloader (envSetNextLoad).
-//   Fundo e música são carregados automaticamente de game/PCSA00126/ (ou bg.png/bg.bgra e music.mp3/music.wav no SD).
-//   <pasta>/data/launcher/capa_gow1.(webp|png|jpg), capa_gow2.*  capas dos cards (do usuário, ficam fora do NRO)
+//   Fundo, capas dos cards e música são carregados automaticamente de game/PCSA00126/ (ou overrides no SD).
+//   <pasta>/data/launcher/capa_gow1.(webp|png|jpg), capa_gow2.*  capas personalizadas dos cards (opcional)
 #include <switch.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -900,12 +900,37 @@ static int img_ler(const char *base, Img *o) {
     return 0;
 }
 
-// Reduz `s` para w x h cobrindo a área (corta o excesso no centro), com média de caixa.
+// Reduz/amplia `s` para w x h cobrindo a área (corta o excesso no centro).
 static int img_cobrir(const Img *s, int w, int h, Img *o) {
     o->p = malloc((size_t)w * h * 4); if (!o->p) return 0;
     o->w = w, o->h = h;
     float esc = fmaxf((float)w / s->w, (float)h / s->h);
     float sw = w / esc, sh = h / esc, x0 = (s->w - sw) * .5f, y0 = (s->h - sh) * .5f, passo = 1 / esc;
+    if (passo < 1.f) {
+        for (int j = 0; j < h; j++) {
+            float fy = y0 + (j + .5f) * passo - .5f;
+            if (fy < 0.f) fy = 0.f;
+            int y1 = (int)fy, y2 = y1 + 1;
+            float wy = fy - y1;
+            if (y1 >= s->h - 1) { y1 = y2 = s->h - 1; wy = 0.f; }
+            for (int i = 0; i < w; i++) {
+                float fx = x0 + (i + .5f) * passo - .5f;
+                if (fx < 0.f) fx = 0.f;
+                int x1 = (int)fx, x2 = x1 + 1;
+                float wx = fx - x1;
+                if (x1 >= s->w - 1) { x1 = x2 = s->w - 1; wx = 0.f; }
+                u32 p00 = s->p[y1 * s->w + x1], p10 = s->p[y1 * s->w + x2];
+                u32 p01 = s->p[y2 * s->w + x1], p11 = s->p[y2 * s->w + x2];
+                float w00 = (1.f - wx) * (1.f - wy), w10 = wx * (1.f - wy);
+                float w01 = (1.f - wx) * wy,         w11 = wx * wy;
+                u32 r = (u32)((p00 & 0xff) * w00 + (p10 & 0xff) * w10 + (p01 & 0xff) * w01 + (p11 & 0xff) * w11 + .5f);
+                u32 g = (u32)(((p00 >> 8) & 0xff) * w00 + ((p10 >> 8) & 0xff) * w10 + ((p01 >> 8) & 0xff) * w01 + ((p11 >> 8) & 0xff) * w11 + .5f);
+                u32 b = (u32)(((p00 >> 16) & 0xff) * w00 + ((p10 >> 16) & 0xff) * w10 + ((p01 >> 16) & 0xff) * w01 + ((p11 >> 16) & 0xff) * w11 + .5f);
+                o->p[j * w + i] = RGB(r > 255 ? 255 : r, g > 255 ? 255 : g, b > 255 ? 255 : b);
+            }
+        }
+        return 1;
+    }
     for (int j = 0; j < h; j++) {
         int ya = (int)(y0 + j * passo), yb = (int)(y0 + (j + 1) * passo);
         if (yb <= ya) yb = ya + 1;
@@ -935,9 +960,12 @@ static void capas_carregar(void) {
     for (int i = 0; i < N; i++) {
         char base[FS_MAX_PATH]; snprintf(base, sizeof base, "%.700sdata/launcher/capa_%s", dir, jogos[i].id);
         Img o = { 0 };
-        if (!img_ler(base, &o)) {               // sem capa própria no SD: usa a que vem dentro do NRO
+        if (!img_ler(base, &o)) {               // sem capa própria no SD: tenta romfs:/ ou game/PCSA00126/
             snprintf(base, sizeof base, "romfs:/capa_%s", jogos[i].id);
-            if (!img_ler(base, &o)) continue;
+            if (!romfs_ativo || !img_ler(base, &o)) {
+                if (!ga_load_game_card_rgba(dir, i, jogos[i].tinta, &o.p, &o.w, &o.h))
+                    continue;
+            }
         }
         tem_capa[i] = img_cobrir(&o, CW1, CH1, &capa_g[i]) && img_cobrir(&o, CW0, CH0, &capa_p[i]);
         free(o.p);

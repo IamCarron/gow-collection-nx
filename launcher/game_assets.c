@@ -39,6 +39,9 @@ static uint64_t be40(const uint8_t *p) {
     return ((uint64_t)p[0] << 32) | ((uint64_t)p[1] << 24) |
            ((uint64_t)p[2] << 16) | ((uint64_t)p[3] << 8) | (uint64_t)p[4];
 }
+static uint64_t be64(const uint8_t *p) {
+    return ((uint64_t)be32(p) << 32) | (uint64_t)be32(p + 4);
+}
 
 static int path_eq_ci(const char *a, const char *b) {
     while (*a == '/') a++;
@@ -340,8 +343,9 @@ static int load_png_file(const char *path, uint32_t *out_rgba, int dst_w, int ds
     return ok;
 }
 
-static int decode_tga_mem(const uint8_t *buf, size_t len, uint32_t *out_rgba, int dst_w, int dst_h) {
-    if (!buf || len < 18) return 0;
+static int decode_tga_raw(const uint8_t *buf, size_t len,
+                          uint8_t **out_rgba, int *out_w, int *out_h) {
+    if (!buf || len < 18 || !out_rgba || !out_w || !out_h) return 0;
     uint8_t id_len = buf[0];
     uint8_t cmap_type = buf[1];
     uint8_t img_type = buf[2];
@@ -372,8 +376,208 @@ static int decode_tga_mem(const uint8_t *buf, size_t len, uint32_t *out_rgba, in
             drow[x * 4 + 3] = (px_bytes == 4) ? srow[x * px_bytes + 3] : 0xffu;
         }
     }
+    *out_rgba = rgba;
+    *out_w = w;
+    *out_h = h;
+    return 1;
+}
+
+static int decode_tga_mem(const uint8_t *buf, size_t len, uint32_t *out_rgba, int dst_w, int dst_h) {
+    uint8_t *rgba = NULL;
+    int w = 0, h = 0;
+    if (!decode_tga_raw(buf, len, &rgba, &w, &h)) return 0;
     scale_rgba_bilinear(rgba, w, h, out_rgba, dst_w, dst_h);
     free(rgba);
+    return 1;
+}
+
+typedef struct {
+    const uint8_t *buf;
+    size_t len;
+    size_t pos;
+} PngMemReader;
+
+static void png_mem_read(png_structp png, png_bytep dst, png_size_t n) {
+    PngMemReader *r = (PngMemReader *)png_get_io_ptr(png);
+    if (!r || n > r->len - r->pos) {
+        png_error(png, "EOF");
+        return;
+    }
+    memcpy(dst, r->buf + r->pos, n);
+    r->pos += n;
+}
+
+static int decode_png_raw(const uint8_t *buf, size_t len,
+                          uint8_t **out_rgba, int *out_w, int *out_h) {
+    if (!buf || len < 8 || !out_rgba || !out_w || !out_h) return 0;
+    if (png_sig_cmp(buf, 0, 8) != 0) return 0;
+
+    PngLoadCtx ctx;
+    memset(&ctx, 0, sizeof ctx);
+    ctx.png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!ctx.png) return 0;
+    ctx.info = png_create_info_struct(ctx.png);
+    if (!ctx.info) {
+        png_destroy_read_struct(&ctx.png, NULL, NULL);
+        return 0;
+    }
+
+    PngMemReader rd = { buf, len, 8 };
+    int ok = 0;
+    int img_w = 0, img_h = 0;
+    if (setjmp(png_jmpbuf(ctx.png)) == 0) {
+        png_set_read_fn(ctx.png, &rd, png_mem_read);
+        png_set_sig_bytes(ctx.png, 8);
+        png_read_info(ctx.png, ctx.info);
+
+        png_uint_32 w = png_get_image_width(ctx.png, ctx.info);
+        png_uint_32 h = png_get_image_height(ctx.png, ctx.info);
+        int bit_depth = png_get_bit_depth(ctx.png, ctx.info);
+        int color_type = png_get_color_type(ctx.png, ctx.info);
+
+        if (w > 0 && h > 0 && w <= GA_MAX_DIM && h <= GA_MAX_DIM) {
+            if (bit_depth == 16) png_set_strip_16(ctx.png);
+            if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(ctx.png);
+            if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)
+                png_set_expand_gray_1_2_4_to_8(ctx.png);
+            if (png_get_valid(ctx.png, ctx.info, PNG_INFO_tRNS))
+                png_set_tRNS_to_alpha(ctx.png);
+            if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
+                png_set_gray_to_rgb(ctx.png);
+            if (color_type == PNG_COLOR_TYPE_RGB ||
+                color_type == PNG_COLOR_TYPE_GRAY ||
+                color_type == PNG_COLOR_TYPE_PALETTE)
+                png_set_filler(ctx.png, 0xFF, PNG_FILLER_AFTER);
+            png_read_update_info(ctx.png, ctx.info);
+
+            ctx.rgba = (uint8_t *)malloc((size_t)w * (size_t)h * 4u);
+            ctx.rows = (png_bytep *)malloc((size_t)h * sizeof(png_bytep));
+            if (ctx.rgba && ctx.rows) {
+                for (png_uint_32 y = 0; y < h; y++)
+                    ctx.rows[y] = ctx.rgba + (size_t)y * (size_t)w * 4u;
+                png_read_image(ctx.png, ctx.rows);
+                png_read_end(ctx.png, NULL);
+                img_w = (int)w;
+                img_h = (int)h;
+                ok = 1;
+            }
+        }
+    }
+
+    png_destroy_read_struct(&ctx.png, &ctx.info, NULL);
+    free(ctx.rows);
+    if (ok) {
+        *out_rgba = ctx.rgba;
+        *out_w = img_w;
+        *out_h = img_h;
+    } else {
+        free(ctx.rgba);
+    }
+    return ok;
+}
+
+static uint32_t *composite_rgba_over_rgb(const uint8_t *rgba, int w, int h, uint32_t bg_rgb) {
+    size_t n = (size_t)w * (size_t)h;
+    uint32_t *out = (uint32_t *)malloc(n * 4u);
+    if (!out) return NULL;
+    uint32_t br = bg_rgb & 0xffu;
+    uint32_t bg = (bg_rgb >> 8) & 0xffu;
+    uint32_t bb = (bg_rgb >> 16) & 0xffu;
+    for (size_t i = 0; i < n; i++) {
+        const uint8_t *p = rgba + i * 4u;
+        uint32_t a = p[3];
+        uint32_t r = (a == 255u) ? p[0] : ((uint32_t)p[0] * a + br * (255u - a) + 127u) / 255u;
+        uint32_t g = (a == 255u) ? p[1] : ((uint32_t)p[1] * a + bg * (255u - a) + 127u) / 255u;
+        uint32_t b = (a == 255u) ? p[2] : ((uint32_t)p[2] * a + bb * (255u - a) + 127u) / 255u;
+        out[i] = r | (g << 8) | (b << 16) | 0xff000000u;
+    }
+    return out;
+}
+
+static uint8_t *trp_extract_entry(const char *trp_path, const char *entry_name,
+                                  size_t max_bytes, size_t *out_size) {
+    if (out_size) *out_size = 0;
+    FILE *f = fopen(trp_path, "rb");
+    if (!f) return NULL;
+    uint8_t h[0x40];
+    uint8_t *res = NULL;
+    if (fread(h, 1, sizeof h, f) == sizeof h && be32(h) == 0xDCA24D00u) {
+        uint32_t n = be32(h + 16);
+        uint32_t esz = be32(h + 20);
+        if (esz >= 48 && esz <= 256) {
+            uint8_t e[256];
+            for (uint32_t i = 0; i < n && i < 256; i++) {
+                if (fseeko(f, (off_t)(0x40u + (uint64_t)i * (uint64_t)esz), SEEK_SET) != 0 ||
+                    fread(e, 1, esz, f) != esz)
+                    break;
+                if (strncmp((const char *)e, entry_name, 32) != 0) continue;
+                uint64_t off = be64(e + 32);
+                uint64_t sz = be64(e + 40);
+                if (sz == 0 || sz > (uint64_t)max_bytes) break;
+                uint8_t *buf = (uint8_t *)malloc((size_t)sz);
+                if (buf && fseeko(f, (off_t)off, SEEK_SET) == 0 &&
+                    fread(buf, 1, (size_t)sz, f) == (size_t)sz) {
+                    res = buf;
+                    if (out_size) *out_size = (size_t)sz;
+                } else {
+                    free(buf);
+                }
+                break;
+            }
+        }
+    }
+    fclose(f);
+    return res;
+}
+
+int ga_load_game_card_rgba(const char *dir, int game_idx, uint32_t bg_rgb,
+                           uint32_t **out_rgba, int *out_w, int *out_h) {
+    if (!dir || game_idx < 0 || game_idx > 1 || !out_rgba || !out_w || !out_h) return 0;
+    *out_rgba = NULL;
+    *out_w = 0;
+    *out_h = 0;
+
+    char p[1024];
+    uint8_t *raw_rgba = NULL;
+    int w = 0, h = 0;
+
+    // 1. Arte do seletor de jogos do Vita dentro de System.psarc
+    snprintf(p, sizeof p, "%.800sgame/PCSA00126/System.psarc", dir);
+    if (ga_exists(p)) {
+        static const char *const kIcons[2][3] = {
+            { "/System/Icon_GOW1_US.tga", "/System/Icon_GOW1_EU.tga", "/System/Icon_GOW1_JP.tga" },
+            { "/System/Icon_GOW2_US.tga", "/System/Icon_GOW2_EU.tga", "/System/Icon_GOW2_JP.tga" },
+        };
+        for (size_t i = 0; i < 3; i++) {
+            size_t sz = 0;
+            uint8_t *tga = ga_psarc_extract(p, kIcons[game_idx][i], GA_MAX_COVER_SZ, &sz);
+            if (tga) {
+                int ok = decode_tga_raw(tga, sz, &raw_rgba, &w, &h);
+                free(tga);
+                if (ok) break;
+            }
+        }
+    }
+
+    // 2. Fallback: ICON0.PNG de dentro do TROPHY.TRP de cada jogo
+    if (!raw_rgba) {
+        const char *npwr = game_idx == 0 ? "NPWR05244_00" : "NPWR05283_00";
+        snprintf(p, sizeof p, "%.800sgame/PCSA00126/sce_sys/trophy/%s/TROPHY.TRP", dir, npwr);
+        size_t sz = 0;
+        uint8_t *png = trp_extract_entry(p, "ICON0.PNG", GA_MAX_COVER_SZ, &sz);
+        if (png) {
+            decode_png_raw(png, sz, &raw_rgba, &w, &h);
+            free(png);
+        }
+    }
+
+    if (!raw_rgba) return 0;
+    uint32_t *dst = composite_rgba_over_rgb(raw_rgba, w, h, bg_rgb);
+    free(raw_rgba);
+    if (!dst) return 0;
+    *out_rgba = dst;
+    *out_w = w;
+    *out_h = h;
     return 1;
 }
 

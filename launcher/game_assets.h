@@ -24,6 +24,15 @@ uint8_t *ga_psarc_extract(const char *psarc_path, const char *target_path,
 int ga_load_cover_rgba(const char *dir, int romfs_ativo,
                        uint32_t *out_rgba, int dst_w, int dst_h);
 
+// Carrega a capa do card de um jogo (0 = GoW 1, 1 = GoW 2) de game/PCSA00126/.
+// Ordem de prioridade:
+//   1. <dir>game/PCSA00126/System.psarc -> /System/Icon_GOW{1,2}_{US,EU,JP}.tga
+//   2. <dir>game/PCSA00126/sce_sys/trophy/NPWR{05244,05283}_00/TROPHY.TRP -> ICON0.PNG
+// Pixels transparentes são compostos sobre bg_rgb (0x00BBGGRR).
+// Retorna 1 e aloca *out_rgba (malloc, liberar com free) com *out_w x *out_h pixels RGBA8888.
+int ga_load_game_card_rgba(const char *dir, int game_idx, uint32_t bg_rgb,
+                           uint32_t **out_rgba, int *out_w, int *out_h);
+
 // Verifica se o arquivo PSARC principal do jogo existe em <dir>game/PCSA00126/exec/.
 // game_idx: 0 = God of War (gow1_psp2_SCEA.psarc), 1 = God of War II (gow2_psp2_SCEA.psarc).
 int ga_game_dump_ok(const char *dir, int game_idx);

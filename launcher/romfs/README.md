@@ -1,6 +1,6 @@
 Opcional (não versionados):
 
-Por padrão, o launcher carrega automaticamente o fundo e a música diretamente da sua cópia legal do jogo em `game/PCSA00126/` (sem distribuir arquivos da Sony no repositório).
+Por padrão, o launcher carrega automaticamente o fundo, as capas dos cards (`System.psarc` / `TROPHY.TRP`) e a música diretamente da sua cópia legal do jogo em `game/PCSA00126/` (sem distribuir arquivos da Sony no repositório).
 
 Se quiser personalizar, você pode colocar arquivos próprios na pasta do launcher no cartão SD (`sdmc:/switch/gow-nx/`) ou aqui antes de compilar:
 

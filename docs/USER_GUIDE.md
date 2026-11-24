@@ -23,9 +23,10 @@ Também dá para abrir `gow1.nro` ou `gow2.nro` direto pelo Homebrew Menu; nesse
 | **+** | Sair |
 
 O launcher lembra o último jogo escolhido (`launcher.cfg`, na mesma pasta), mostra a bateria, verifica se os arquivos
-em `game/PCSA00126/exec/` estão presentes e carrega automaticamente o fundo (`sce_sys/pic0.png`) e a música tema
-(`tit1e1_2.at9` de `gow1_psp2_SCEA.psarc`) da sua cópia em `game/PCSA00126/`. Para personalizar, basta colocar
-`bg.png`/`bg.bgra` ou `music.mp3`/`music.wav` na pasta do launcher no cartão SD.
+em `game/PCSA00126/exec/` estão presentes e carrega automaticamente o fundo (`sce_sys/pic0.png`), as capas dos cards
+(`System.psarc` / `TROPHY.TRP`) e a música tema (`tit1e1_2.at9` de `gow1_psp2_SCEA.psarc`) da sua cópia em
+`game/PCSA00126/`. Para personalizar, basta colocar `bg.png`/`bg.bgra`, `music.mp3`/`music.wav` ou
+`data/launcher/capa_gow1.*`/`capa_gow2.*` na pasta do launcher no cartão SD.
 
 ### Presets rápidos (L / R)
 
