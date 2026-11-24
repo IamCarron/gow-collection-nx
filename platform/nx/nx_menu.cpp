@@ -363,7 +363,7 @@ void change(int dir) {
     if (id == nxopt::LANG) {
         g_lang = (g_lang + dir + 3) % 3;
         g_val[nxopt::LANG] = (uint32_t)g_lang;
-        nxopt::set(nxopt::LANG, g_lang == UI_EN ? 1u : 0u);
+        nxopt::set(nxopt::LANG, (uint32_t)g_lang);
         g_dirty = true;
         return;
     }
