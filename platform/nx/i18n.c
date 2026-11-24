@@ -216,7 +216,8 @@ static void load_sd(const char *dir) {
     qsort(names, (size_t)n, sizeof names[0], (int (*)(const void *, const void *))strcmp);
     for (int i = 0; i < n; i++) {
         char path[768];
-        snprintf(path, sizeof path, "%s/%s", dir, names[i]);
+        if (strlen(dir) > 700) break;
+        snprintf(path, sizeof path, "%.700s/%.63s", dir, names[i]);
         FILE *f = fopen(path, "rb");
         if (!f) continue;
         char *buf = (char *)malloc(I18N_MAX_FILE);
