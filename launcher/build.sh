@@ -14,9 +14,9 @@ fi
 UPDATE_REPO=${UPDATE_REPO:-gerisson1996/gow-collection-nx}
 mkdir -p "$O" "$ROOT/launcher/romfs"
 ARCH=(-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE)
-CFLAGS=("${ARCH[@]}" -O2 -Wall -Wno-format-truncation -D__SWITCH__ "-DVERSAO=\"$VERSION\"" "-DUPDATE_REPO=\"$UPDATE_REPO\"" "-I$DKP/libnx/include" "-I$PL/include" "-I$PL/include/freetype2" "-I$ROOT/launcher")
+CFLAGS=("${ARCH[@]}" -O2 -Wall -Wno-format-truncation -D__SWITCH__ "-DVERSAO=\"$VERSION\"" "-DUPDATE_REPO=\"$UPDATE_REPO\"" "-I$DKP/libnx/include" "-I$PL/include" "-I$PL/include/freetype2" "-I$ROOT/launcher" "-I$ROOT/platform/nx")
 
-OBJS=("$O/main.o" "$O/game_assets.o" "$O/trophies.o")
+OBJS=("$O/main.o" "$O/game_assets.o" "$O/trophies.o" "$O/i18n.o" "$O/i18n_data.o")
 
 # LibAtrac9 opcional (MIT): decodifica tit1e1_2.at9 direto de game/PCSA00126/exec/gow1_psp2_SCEA.psarc
 AT9_SRC=""
@@ -61,6 +61,8 @@ fi
 
 "$B/aarch64-none-elf-gcc" "${CFLAGS[@]}" -c "$ROOT/launcher/game_assets.c" -o "$O/game_assets.o"
 "$B/aarch64-none-elf-gcc" "${CFLAGS[@]}" -c "$ROOT/launcher/trophies.c" -o "$O/trophies.o"
+"$B/aarch64-none-elf-gcc" "${CFLAGS[@]}" -c "$ROOT/platform/nx/i18n.c" -o "$O/i18n.o"
+"$B/aarch64-none-elf-gcc" "${CFLAGS[@]}" -c "$ROOT/platform/nx/i18n_data.c" -o "$O/i18n_data.o"
 "$B/aarch64-none-elf-gcc" "${CFLAGS[@]}" -c "$ROOT/launcher/main.c" -o "$O/main.o"
 "$B/aarch64-none-elf-gcc" -specs="$DKP/libnx/switch.specs" "${ARCH[@]}" -o "$O/gow-nx.elf" "${OBJS[@]}" -L"$PL/lib" -L"$DKP/libnx/lib" \
     "${CURL_LIBS[@]}" -lwebp -lfreetype -lharfbuzz -lfreetype -lbz2 -lpng16 -lz -lmpg123 -lnx -lm
