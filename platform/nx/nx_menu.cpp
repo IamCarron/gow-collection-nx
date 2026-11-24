@@ -2,6 +2,7 @@
 // para a imagem da swapchain (gxm_vk.cpp). As mudanças vão para game_options.cpp pela ponte nxopt.
 #include "nx_menu.h"
 #include "vitart.h"
+#include "nx_platform.h"
 
 #include <switch.h>
 #include <ft2build.h>
@@ -24,7 +25,7 @@ int g_sel = 0;
 uint32_t g_val[nxopt::COUNT] = {};
 bool g_dirty = true;
 int g_hold = 0, g_hold_dir = 0;
-bool g_confirm = false; // pop-up de aviso antes de ligar o diagnóstico da GPU
+int g_confirm = 0; // pop-up de confirmação: 1 = ligar o diagnóstico da GPU, 2 = sair do jogo
 // idioma (opção LANG, a mesma do launcher: language= no vitart_options.ini): 0 português (Brasil), 1 inglês
 bool en() { return g_val[nxopt::LANG] != 0; }
 const char *L(const char *pt, const char *en_) { return en() ? en_ : pt; }
@@ -35,7 +36,7 @@ const char *const kTabNome[kTabs] = {"Gráficos", "Mods", "Cheats", "Sistema"};
 const char *const kTabNomeEn[kTabs] = {"Graphics", "Mods", "Cheats", "System"};
 const char *tab_nome(int t) { return en() ? kTabNomeEn[t] : kTabNome[t]; }
 // ações que não são opções do jogo
-enum { A_CLOSE = -1, A_PRESET = -2, A_RESET = -3 };
+enum { A_CLOSE = -1, A_PRESET = -2, A_RESET = -3, A_EXIT = -4 };
 
 struct Item {
     int tab, id; // id: nxopt::Id, ou uma ação A_*
@@ -93,6 +94,8 @@ const Item kItems[] = {
      "Restore defaults", "Resets image and color settings (resolution and frame rate stay as they are)."},
     {T_SYS, A_CLOSE, "Fechar menu", "Volta para o jogo. Também fecha com B ou R + Plus.",
      "Close menu", "Back to the game. B or R + Plus also closes it."},
+    {T_SYS, A_EXIT, "Sair do jogo", "Fecha o jogo. O progresso que não foi salvo no jogo se perde.",
+     "Exit game", "Closes the game. Progress not saved in the game is lost."},
 };
 constexpr int kN = sizeof kItems / sizeof kItems[0];
 int g_tab = 0;
@@ -233,6 +236,10 @@ void change(int dir) {
         if (dir > 0) close();
         return;
     }
+    if (id == A_EXIT) {
+        if (dir > 0) g_confirm = 2, g_dirty = true;
+        return;
+    }
     if (id == A_RESET) {
         if (dir <= 0) return;
         set_val(nxopt::UPSCALE, 0), set_val(nxopt::SHARP, 0), set_val(nxopt::AA, 0), set_val(nxopt::ANISO, 1);
@@ -253,7 +260,7 @@ void change(int dir) {
     else p = (p % nv + nv) % nv;
     const uint32_t v = val_of(id, p);
     if (v == g_val[id]) return;
-    if (id == nxopt::GPUDIAG && v) { g_confirm = true, g_dirty = true; return; } // pede confirmação primeiro
+    if (id == nxopt::GPUDIAG && v) { g_confirm = 1, g_dirty = true; return; } // pede confirmação primeiro
     g_val[id] = v;
     nxopt::set(id, v);
     g_dirty = true;
@@ -296,9 +303,16 @@ void update() {
     }
     if (g_confirm) {
         if (down & HidNpadButton_A) {
-            g_confirm = false, g_val[nxopt::GPUDIAG] = 1, g_dirty = true;
+            if (g_confirm == 2) {
+                g_confirm = 0;
+                close();
+                vt::logf("nxmenu: sair do jogo");
+                nxp::request_exit();
+                return;
+            }
+            g_confirm = 0, g_val[nxopt::GPUDIAG] = 1, g_dirty = true;
             nxopt::set(nxopt::GPUDIAG, 1);
-        } else if (down & (HidNpadButton_B | HidNpadButton_Plus)) g_confirm = false, g_dirty = true;
+        } else if (down & (HidNpadButton_B | HidNpadButton_Plus)) g_confirm = 0, g_dirty = true;
         return;
     }
     if (down & (HidNpadButton_B | HidNpadButton_Plus)) { close(); return; }
@@ -557,8 +571,8 @@ void draw(uint32_t screen_h) {
         const int base = y + row / 2 + S(6);
         const uint32_t tc = !ok ? kDim : sel ? kWhite : kText;
         const int xr = (int)g_w - S(18);
-        if (id == A_CLOSE || id == A_RESET) {   // ação: selo "Executar"
-            const char *e = id == A_CLOSE ? L("Fechar", "Close") : L("Executar", "Run");
+        if (id == A_CLOSE || id == A_RESET || id == A_EXIT) {   // ação: selo "Executar"
+            const char *e = id == A_CLOSE ? L("Fechar", "Close") : id == A_EXIT ? L("Sair", "Exit") : L("Executar", "Run");
             const int ew = text_w(e, S(13));
             rrect(xr - ew - S(16), y + row / 2 - S(11), ew + S(16), S(22), S(4), kGoldMid, 51);
             text(xr - ew - S(8), base - S(1), e, S(13), kGold);
@@ -635,10 +649,13 @@ void draw(uint32_t screen_h) {
                               "Use só para gravar um log e depois desligue."};
         const char *l2en[] = {"WARNING", "Diagnostics time every GPU draw", "and make the game much slower.",
                               "Use it only to record a log, then turn it off."};
-        const char *const *l2 = en() ? l2en : l2pt;
+        const char *l3pt[] = {"SAIR DO JOGO", "O jogo vai fechar agora.", "O progresso que não foi salvo no jogo", "será perdido."};
+        const char *l3en[] = {"EXIT GAME", "The game will close now.", "Progress not saved in the game", "will be lost."};
+        const char *const *l2 = g_confirm == 2 ? (en() ? l3en : l3pt) : (en() ? l2en : l2pt);
         text(bx2 + (bw - text_w(l2[0], S(24))) / 2, by + S(44), l2[0], S(24), kGold);
         for (int i = 1; i < 4; i++) text(bx2 + (bw - text_w(l2[i], S(16))) / 2, by + S(64) + S(28) * i, l2[i], S(16), kWhite);
-        const char *b = L("A: ligar mesmo assim     B: cancelar", "A: turn on anyway     B: cancel");
+        const char *b = g_confirm == 2 ? L("A: sair     B: cancelar", "A: exit     B: cancel")
+                                       : L("A: ligar mesmo assim     B: cancelar", "A: turn on anyway     B: cancel");
         text(bx2 + (bw - text_w(b, S(16))) / 2, by + bh - S(22), b, S(16), kGrey);
     }
 }

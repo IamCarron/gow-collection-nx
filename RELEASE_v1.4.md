@@ -36,6 +36,7 @@ opções de imagem, sistema de troféus, atualizador integrado e suporte a **por
 - Todas as opções novas de imagem e desempenho mudam com o jogo rodando, sem reiniciar.
 - **Cheats**: vida, magia e fúria infinitas. **Mods**: texturas HD, barras de vida dos inimigos e QTE automático.
 - Diagnóstico da GPU para gerar logs de desempenho, com aviso antes de ligar.
+- **Sair do jogo** em *Sistema*, com confirmação.
 
 ### Idiomas
 - **Português (Brasil) e inglês** no launcher e no mod menu. A escolha fica em *Opções → Jogo → Idioma* ou em
@@ -91,6 +92,7 @@ options, a trophy system, a built-in updater and **English and Portuguese** supp
 - All new image and performance options change while the game runs, no restart needed.
 - **Cheats**: infinite health, magic and rage. **Mods**: HD textures, enemy health bars and auto QTE.
 - GPU diagnostics for performance logs, with a warning before it turns on.
+- **Exit game** under *System*, with a confirmation.
 
 ### Languages
 - **English and Portuguese (Brazil)** in the launcher and the mod menu. Pick it under *Options → Game → Language* or

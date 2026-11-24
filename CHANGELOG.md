@@ -40,6 +40,7 @@ opções de imagem, sistema de troféus, atualizador integrado e suporte a **por
 - Todas as opções novas de imagem e desempenho mudam com o jogo rodando, sem reiniciar.
 - **Cheats**: vida, magia e fúria infinitas. **Mods**: texturas HD, barras de vida dos inimigos e QTE automático.
 - Diagnóstico da GPU para gerar logs de desempenho, com aviso antes de ligar.
+- **Sair do jogo** em *Sistema*, com confirmação.
 
 ### Idiomas
 - **Português (Brasil) e inglês** no launcher e no mod menu. A escolha fica em *Opções → Jogo → Idioma* ou em
