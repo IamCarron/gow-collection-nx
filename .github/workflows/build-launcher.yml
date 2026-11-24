@@ -30,6 +30,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout LibAtrac9 (MIT)
+        uses: actions/checkout@v4
+        with:
+          repository: Thealexbarney/LibAtrac9
+          path: build/libatrac9
 
       - name: Install Switch portlibs
         run: |
@@ -53,9 +61,11 @@ jobs:
           elif [ "$REF_TYPE" = "tag" ]; then
             VER="${REF_NAME#v}"
           else
-            VER="1.4"
+            TAG=$(git tag --list --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+' | head -n1 || true)
+            VER="${TAG#v}"
+            VER="${VER:-1.4}"
           fi
-          VERSION="$VER" bash launcher/build.sh
+          LIBATRAC9="$PWD/build/libatrac9" VERSION="$VER" bash launcher/build.sh
           sha256sum build/gow-nx.nro > build/gow-nx.nro.sha256
 
       - name: Upload launcher artifact
@@ -110,7 +120,7 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           TAG="launcher-latest"
-          NOTES="Automated launcher build (\`gow-nx.nro\`) from commit \`${SHA:0:7}\`. Place optional \`bg.bgra\` and \`music.mp3\` next to \`gow-nx.nro\` on the SD card. Does not include game files or \`gow1.nro\`/\`gow2.nro\`."
+          NOTES="Automated launcher build (\`gow-nx.nro\`) from commit \`${SHA:0:7}\`. Background art and music are loaded automatically from your own \`game/PCSA00126/\` dump on SD (optional \`bg.png\`/\`bg.bgra\` and \`music.mp3\`/\`music.wav\` overrides supported). Does not include game files or \`gow1.nro\`/\`gow2.nro\`."
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "$REPO" --notes "$NOTES" --prerelease --latest=false
             gh release upload "$TAG" dist/gow-nx.nro dist/gow-nx.nro.sha256 --repo "$REPO" --clobber
