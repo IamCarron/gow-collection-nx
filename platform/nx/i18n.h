@@ -1,9 +1,10 @@
 // Textos da interface (launcher e mod menu) carregados de arquivos por idioma.
 //
 // Cada idioma é um arquivo lang/<código>.ini com linhas "chave = texto". Os idiomas de lang/ vão embutidos
-// no binário (i18n_data.c, gerado por tools/gen_i18n.py) e qualquer <código>.ini numa pasta do SD substitui
-// ou acrescenta textos, ou adiciona um idioma novo sem recompilar. Chave ausente cai no inglês e, se nem
-// ele tiver, devolve a própria chave.
+// no binário (i18n_data.c, gerado por tools/gen_i18n.py) e um <código>.ini numa pasta do SD substitui ou
+// acrescenta textos (ou carrega um idioma novo, que fica disponível em i18n_count()/i18n_code()). Chave ausente
+// cai no inglês e, se nem ele tiver, devolve a própria chave. Textos do SD com especificadores de formato (%s,
+// %d...) diferentes dos do inglês são ignorados.
 #pragma once
 
 #include <stddef.h>
@@ -17,7 +18,8 @@ typedef struct {
     const char *text;   // conteúdo do .ini
 } I18nBuiltin;
 
-// Registra os idiomas embutidos e procura <código>.ini em sd_dir (pode ser NULL). Pode ser chamada de novo.
+// Registra os idiomas embutidos e procura <código>.ini em sd_dir (pode ser NULL). Pode ser chamada de novo,
+// mas libera os textos anteriores: ponteiros devolvidos antes por tr() deixam de valer.
 void i18n_init(const char *sd_dir);
 
 // Idiomas disponíveis (embutidos + SD), sem repetição, na ordem: embutidos e depois os do SD por código.

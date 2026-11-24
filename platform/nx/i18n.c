@@ -122,6 +122,29 @@ static void expand_glyphs(char *s) {
     *w = 0;
 }
 
+// Sequência de conversões printf (%d, %s, %ld...) do texto, sem os "%%". Serve para recusar um texto do SD cujos
+// especificadores não batem com os do inglês: o launcher usa vários textos como formato de snprintf.
+static void fmt_signature(const char *s, char *out, size_t cap) {
+    size_t n = 0;
+    for (; *s; s++) {
+        if (*s != '%') continue;
+        if (s[1] == '%') { s++; continue; }
+        s++;
+        while (*s && strchr("-+ #0123456789.", *s)) s++;
+        while (*s && strchr("hlz", *s) && n + 1 < cap) out[n++] = *s++;
+        if (!*s) break;
+        if (n + 1 < cap) out[n++] = *s;
+    }
+    out[n] = 0;
+}
+
+static int same_format(const char *a, const char *b) {
+    char fa[32], fb[32];
+    fmt_signature(a, fa, sizeof fa);
+    fmt_signature(b, fb, sizeof fb);
+    return !strcmp(fa, fb);
+}
+
 static int cmp_entry(const void *a, const void *b) {
     const Entry *x = (const Entry *)a, *y = (const Entry *)b;
     int c = strcmp(x->key, y->key);
@@ -141,16 +164,31 @@ static void finish(Lang *l) {
     l->n = w;
 }
 
+static const char *lookup_n(int li, const char *key, int n);
+static const char *lookup(int li, const char *key);
+
 int i18n_add_text(const char *code, const char *text, size_t len) {
+    int existed = 0;
+    char c[16];
+    if (normalize_code(code, c, sizeof c)) existed = lang_index(c) >= 0;
     Lang *l = lang_get(code);
-    if (!l || l->nbufs >= I18N_MAX_SOURCES || len > I18N_MAX_FILE) return -1;
+    if (!l) return -1;
+    if (l->nbufs >= I18N_MAX_SOURCES || len > I18N_MAX_FILE) {
+        if (!existed && l == &langs[nlangs - 1]) nlangs--;  // não deixa um idioma vazio na lista
+        return -1;
+    }
     char *buf = (char *)malloc(len + 1);
-    if (!buf) return -1;
+    if (!buf) {
+        if (!existed && l == &langs[nlangs - 1]) nlangs--;
+        return -1;
+    }
     memcpy(buf, text, len);
     buf[len] = 0;
     l->bufs[l->nbufs++] = buf;
     // As entradas já ordenadas continuam valendo; as novas entram depois e vencem nas chaves repetidas.
     for (int i = 0; i < l->n; i++) l->e[i].order = i;
+    const int li = (int)(l - langs), sorted = l->n;
+    int rc = 0;
 
     char *p = buf;
     if ((unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF) p += 3;
@@ -171,16 +209,20 @@ int i18n_add_text(const char *code, const char *text, size_t len) {
         if (vl >= 2 && val[0] == '"' && val[vl - 1] == '"') { val[vl - 1] = 0; val++; }
         unescape(val);
         expand_glyphs(val);
-        if (push_entry(l, key, val)) return -1;
+        // O inglês embutido é carregado primeiro e serve de referência para os especificadores de formato.
+        const char *ref = base < 0 ? NULL : base == li ? lookup_n(li, key, sorted) : lookup(base, key);
+        if (ref && !same_format(ref, val)) continue;
+        if (push_entry(l, key, val)) { rc = -1; break; }
     }
     finish(l);
-    return 0;
+    return rc;
 }
 
-static const char *lookup(int li, const char *key) {
+// Busca binária nas n primeiras entradas (as já ordenadas) do idioma li.
+static const char *lookup_n(int li, const char *key, int n) {
     if (li < 0) return NULL;
     const Lang *l = &langs[li];
-    int lo = 0, hi = l->n - 1;
+    int lo = 0, hi = n - 1;
     while (lo <= hi) {
         int mid = (lo + hi) / 2;
         int c = strcmp(key, l->e[mid].key);
@@ -189,6 +231,8 @@ static const char *lookup(int li, const char *key) {
     }
     return NULL;
 }
+
+static const char *lookup(int li, const char *key) { return li < 0 ? NULL : lookup_n(li, key, langs[li].n); }
 
 void i18n_reset(void) {
     for (int i = 0; i < nlangs; i++) {
@@ -200,6 +244,15 @@ void i18n_reset(void) {
     cur = base = -1;
 }
 
+static int cmp_name(const void *a, const void *b) { return strcmp((const char *)a, (const char *)b); }
+
+// Nome de arquivo vale como idioma só se for inteiro um código válido: "fr.ini" sim, "en.backup.ini" não.
+static int valid_lang_file(const char *name) {
+    char c[16];
+    size_t stem = strlen(name) - 4;
+    return normalize_code(name, c, sizeof c) && strlen(c) == stem;
+}
+
 static void load_sd(const char *dir) {
     DIR *d = opendir(dir);
     if (!d) return;
@@ -209,22 +262,23 @@ static void load_sd(const char *dir) {
     struct dirent *de;
     while ((de = readdir(d)) && n < I18N_MAX_LANGS) {
         size_t len = strlen(de->d_name);
-        if (len < 5 || len >= sizeof names[0] || strcmp(de->d_name + len - 4, ".ini")) continue;
+        if (len < 5 || len >= sizeof names[0] || strcmp(de->d_name + len - 4, ".ini") || !valid_lang_file(de->d_name)) continue;
         memcpy(names[n++], de->d_name, len + 1);
     }
     closedir(d);
-    qsort(names, (size_t)n, sizeof names[0], (int (*)(const void *, const void *))strcmp);
+    qsort(names, (size_t)n, sizeof names[0], cmp_name);
     for (int i = 0; i < n; i++) {
         char path[768];
         if (strlen(dir) > 700) break;
         snprintf(path, sizeof path, "%.700s/%.63s", dir, names[i]);
         FILE *f = fopen(path, "rb");
         if (!f) continue;
-        char *buf = (char *)malloc(I18N_MAX_FILE);
-        size_t len = buf ? fread(buf, 1, I18N_MAX_FILE, f) : 0;
-        int whole = buf && feof(f);
+        long size = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
+        rewind(f);
+        char *buf = size >= 0 && size <= I18N_MAX_FILE ? (char *)malloc((size_t)size + 1) : NULL;
+        size_t len = buf ? fread(buf, 1, (size_t)size, f) : 0;
         fclose(f);
-        if (whole) {
+        if (buf && len == (size_t)size) {
             names[i][strlen(names[i]) - 4] = 0;
             i18n_add_text(names[i], buf, len);
         }

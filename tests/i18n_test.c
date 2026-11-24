@@ -87,6 +87,28 @@ static void test_fallback_and_override(void) {
     CHECK_STR(tr("fmt"), "%d de %s");               // o resto do embutido continua
 }
 
+static void test_format_guard(void) {
+    i18n_init(NULL);
+    i18n_set("pt");
+    // o inglês embutido tem "fmt = %d of %s": textos do SD com outros especificadores são ignorados
+    add("pt", "fmt = %s de %d\nhello = Olá %s\n");
+    CHECK_STR(tr("fmt"), "%d de %s");
+    CHECK_STR(tr("hello"), "Olá");
+    add("pt", "fmt = %2d de 100%% %-5s\n");               // largura e %% não mudam a assinatura
+    CHECK_STR(tr("fmt"), "%2d de 100%% %-5s");
+    add("en", "fmt = %d of %s!\nfmt2 = %ld\n");
+    i18n_set("en");
+    CHECK_STR(tr("fmt"), "%d of %s!");                    // o próprio inglês do SD também é conferido
+    CHECK_STR(tr("fmt2"), "%ld");                         // chave nova sem referência: aceita
+}
+
+static void test_limits(void) {
+    i18n_reset();
+    int before = i18n_count();
+    CHECK(i18n_add_text("xx", "a = b", (size_t)600 * 1024) == -1); // maior que o limite
+    CHECK(i18n_count() == before);                        // não deixa um idioma vazio na lista
+}
+
 static void test_codes(void) {
     i18n_init(NULL);
     CHECK(i18n_find("pt") == i18n_find("pt-BR"));
@@ -137,6 +159,7 @@ static void test_sd_folder(void) {
     write_file("i18n_test_sd/fr.ini", "_name = Français\nhello = Bonjour\n");
     write_file("i18n_test_sd/en.ini", "hello = Hi from SD\n");
     write_file("i18n_test_sd/readme.txt", "não é idioma\n");
+    write_file("i18n_test_sd/en.backup.ini", "hello = backup\n");
     i18n_init(NULL);
     CHECK(i18n_set("pt") == 0);
     i18n_init(dir);
@@ -155,11 +178,14 @@ static void test_sd_folder(void) {
     remove("i18n_test_sd/fr.ini");
     remove("i18n_test_sd/en.ini");
     remove("i18n_test_sd/readme.txt");
+    remove("i18n_test_sd/en.backup.ini");
 }
 
 int main(void) {
     test_parsing();
     test_fallback_and_override();
+    test_format_guard();
+    test_limits();
     test_codes();
     test_many_keys();
     test_sd_folder();
