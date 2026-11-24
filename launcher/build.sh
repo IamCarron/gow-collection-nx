@@ -8,8 +8,7 @@ set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 DKP=${DEVKITPRO:-/opt/devkitpro}; B=$DKP/devkitA64/bin; PL=$DKP/portlibs/switch; O=$ROOT/build/launcher
 if [ -z "${VERSION:-}" ]; then
-    TAG=$(git -C "$ROOT" tag --list --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+' | head -n1 || true)
-    VERSION=${TAG#v}
+    VERSION=$(git -C "$ROOT" tag --list | grep -E '^v?[0-9]+\.[0-9]+' | sed 's/^v//' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -n1 || true)
     VERSION=${VERSION:-1.4}
 fi
 UPDATE_REPO=${UPDATE_REPO:-gerisson1996/gow-collection-nx}
